@@ -1,0 +1,14 @@
+{
+  "name": "pinkbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun src/server.js",
+    "start": "bun src/server.js",
+    "stubs": "bun scripts/generate-stubs.js"
+  },
+  "dependencies": {
+    "tone": "15.1.22"
+  }
+}
