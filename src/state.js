@@ -32,6 +32,8 @@ export class PerformanceState {
     this.pendingBpm = null;
     this.volume = 80;
     this.rec = null;
+    this.motion = 0;
+    this.motionChanged = false;
     this.tracks = Object.fromEntries(
       ROLES.map(({ id }) => [
         id,
@@ -41,6 +43,10 @@ export class PerformanceState {
           active: false,
           pending: null,
           filter: 100,
+          loopDesired: false,
+          loopActive: false,
+          loopPending: null,
+          loopOrigin: 0,
           clip: null,
           phrase: null,
           origin: 0,
@@ -66,7 +72,10 @@ export class PerformanceState {
       track.active = track.desired;
       track.pending = null;
       track.origin = 0;
-      track.phrase = track.clip ? copyEvents(track.clip) : null;
+      track.phrase = null;
+      track.loopActive = track.loopDesired && Boolean(track.clip);
+      track.loopPending = null;
+      track.loopOrigin = 0;
     }
     return true;
   }
@@ -79,6 +88,8 @@ export class PerformanceState {
     if (this.pendingBpm) this.bpm = this.pendingBpm.value;
     this.pendingBpm = null;
     for (const track of Object.values(this.tracks)) {
+      track.loopActive = false;
+      track.loopPending = null;
       track.active = false;
       track.pending = null;
       track.phrase = null;
@@ -88,11 +99,25 @@ export class PerformanceState {
     const track = this.tracks[id];
     if (!track) return;
     track.desired = !track.desired;
-    if (!track.desired && this.rec?.target === id) this.cancelRecording();
+
     track.pending =
       this.status === "running" && track.desired !== track.active
+        ? (this.rec?.target === id ? this.rec.end : nextBar(this.step))
+        : null;
+  }
+  toggleLoop(id) {
+    const track = this.tracks[id];
+    if (!track?.clip) return;
+    track.loopDesired = !track.loopDesired;
+    track.loopPending =
+      this.status === "running" && track.loopDesired !== track.loopActive
         ? nextBar(this.step)
         : null;
+  }
+  setMotion(value) {
+    const motion = clamp(value, 0, 100);
+    if (motion !== this.motion) this.motionChanged = true;
+    this.motion = motion;
   }
   setBpm(value) {
     value = clamp(value, 60, 160);
@@ -103,14 +128,12 @@ export class PerformanceState {
   }
   record() {
     const track = this.tracks[this.selected];
-    if (
-      this.status !== "running" ||
-      this.rec ||
-      !track.active ||
-      !track.desired
-    )
-      return false;
+    if (this.status !== "running" || this.rec) return false;
     const start = nextBar(this.step);
+    if (!track.desired || !track.active) {
+      track.desired = true;
+      track.pending = start;
+    }
     this.rec = {
       token: ++this.recordSerial,
       target: this.selected,
@@ -119,18 +142,10 @@ export class PerformanceState {
       end: start + PHRASE_STEPS,
       events: [],
       generation: this.generation,
-      previousOrigin: track.origin,
     };
     return true;
   }
   cancelRecording() {
-    if (this.rec) {
-      const track = this.tracks[this.rec.target];
-      if (this.rec.phase !== "armed" && track.clip) {
-        track.phrase = copyEvents(track.clip);
-        track.origin = this.rec.previousOrigin;
-      }
-    }
     this.rec = null;
   }
   commitRecording(token, generation) {
@@ -147,14 +162,30 @@ export class PerformanceState {
       this.error = "Recording could not be saved. Previous phrase kept.";
       return false;
     }
-    this.tracks[target].clip = copyEvents(events);
+    const track = this.tracks[target];
+    track.clip = copyEvents(events);
+    track.loopOrigin = this.rec.start;
+    track.loopDesired = track.loopActive = true;
+    track.loopPending = null;
+    track.desired = track.active = false;
+    track.pending = null;
     this.rec = null;
     return true;
   }
   advance(step) {
     if (this.status !== "running") return { attacks: [], cuts: [] };
     this.step = step;
-    const frame = { attacks: [], cuts: [], bpm: null, finalize: null };
+    const frame = { attacks: [], cuts: [], bpm: null };
+    if (this.motionChanged) {
+      if (this.rec?.target === "keys" && this.rec.phase === "recording") {
+        const tick = (step - this.rec.start) * STEP_TICKS;
+        // Capture the real early note-off when the dial releases a held chord.
+        for (const event of this.rec.events)
+          event.duration = Math.min(event.duration, tick - event.tick);
+      }
+      frame.cuts.push("keys");
+      this.motionChanged = false;
+    }
     if (this.pendingBpm && step >= this.pendingBpm.step) {
       this.bpm = this.pendingBpm.value;
       this.pendingBpm = null;
@@ -166,43 +197,66 @@ export class PerformanceState {
         track.pending = null;
         frame.cuts.push(track.id);
         track.origin = step;
-        track.phrase = track.clip ? copyEvents(track.clip) : null;
+        track.phrase = null;
+      }
+    }
+    for (const track of Object.values(this.tracks)) {
+      if (track.loopPending !== null && step >= track.loopPending) {
+        track.loopActive = track.loopDesired;
+        track.loopPending = null;
+        track.loopOrigin = step;
+        frame.cuts.push(`${track.id}:loop`);
       }
     }
     if (this.rec?.phase === "armed" && step >= this.rec.start) {
       this.rec.phase = "recording";
       const track = this.tracks[this.rec.target];
-      if (track.clip) {
-        // Replacing a saved layer captures a fresh live candidate.
+      // REC owns its full capture interval, even if LIVE was queued off.
+      if (!track.active) {
+        track.active = true;
         track.origin = step;
-        track.phrase = generatePhrase(track.id, this.seed++);
+        track.phrase = null;
         frame.cuts.push(track.id);
       }
     }
     if (this.rec?.phase === "recording" && step >= this.rec.end) {
       this.rec.phase = "finalizing";
-      const track = this.tracks[this.rec.target];
-      track.phrase = copyEvents(this.rec.events);
-      track.origin = this.rec.start;
-      frame.finalize = { token: this.rec.token, generation: this.generation };
+      const token = this.rec.token;
+      const generation = this.generation;
+      const target = this.rec.target;
+      if (this.commitRecording(token, generation)) {
+        frame.cuts.push(target, `${target}:loop`);
+      }
+    }
+    for (const track of Object.values(this.tracks)) {
+      if (!track.loopActive || !track.clip) continue;
+      const position = ((step - track.loopOrigin) % PHRASE_STEPS + PHRASE_STEPS) % PHRASE_STEPS;
+      for (const event of track.clip) {
+        if (event.tick === position * STEP_TICKS)
+          frame.attacks.push({ role: track.id, source: "loop", ...event });
+      }
     }
     for (const track of Object.values(this.tracks)) {
       if (!track.active) continue;
       const position =
         (((step - track.origin) % PHRASE_STEPS) + PHRASE_STEPS) % PHRASE_STEPS;
-      const recording =
-        this.rec?.target === track.id &&
-        ["recording", "finalizing"].includes(this.rec.phase);
-      if (
-        !track.phrase ||
-        (position === 0 &&
-          !track.clip &&
-          !(recording && this.rec.phase === "finalizing"))
-      )
+      if (!track.phrase || position === 0)
         track.phrase = generatePhrase(track.id, this.seed++);
-      for (const event of track.phrase) {
+      let played = track.phrase;
+      if (track.id === "keys" && this.motion > 0) {
+        const bar = Math.floor(position / BAR_STEPS);
+        const chord = track.phrase.find(e => e.tick === bar * BAR_STEPS * STEP_TICKS);
+        const spacing = this.motion < 34 ? 4 : this.motion < 67 ? 2 : 1;
+        played = position % spacing === 0 ? [{
+          tick: position * STEP_TICKS,
+          duration: spacing * STEP_TICKS,
+          notes: [chord.notes[Math.floor(position / spacing) % chord.notes.length]],
+          velocity: 0.48,
+        }] : [];
+      }
+      for (const event of played) {
         if (event.tick !== position * STEP_TICKS) continue;
-        frame.attacks.push({ role: track.id, ...event });
+        frame.attacks.push({ role: track.id, source: "live", ...event });
         if (this.rec?.target === track.id && this.rec.phase === "recording") {
           const tick = (step - this.rec.start) * STEP_TICKS;
           this.rec.events.push({
@@ -229,6 +283,7 @@ export class PerformanceState {
       bpm: this.bpm,
       pendingBpm: this.pendingBpm ? { ...this.pendingBpm } : null,
       volume: this.volume,
+      motion: this.motion,
       rec: this.rec
         ? {
             target: this.rec.target,
@@ -238,12 +293,15 @@ export class PerformanceState {
           }
         : null,
       tracks: Object.values(this.tracks).map(
-        ({ id, desired, active, pending, filter, clip }) => ({
+        ({ id, desired, active, pending, filter, clip, loopDesired, loopActive, loopPending }) => ({
           id,
           desired,
           active,
           pending,
           filter,
+          loopDesired,
+          loopActive,
+          loopPending,
           saved: Boolean(clip),
           eventCount: clip?.length ?? 0,
         }),

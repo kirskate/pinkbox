@@ -635,3 +635,39 @@ footer {
     transition: none !important;
   }
 }
+
+/* Independent live and loop controls, visible phrase capture and chord dial. */
+.layer-bottom { flex-wrap: wrap; gap: 8px; }
+.saved-label { flex-basis: 100%; }
+.loop-toggle[aria-pressed="true"], .layer-toggle[aria-pressed="true"] { background: var(--track-color); }
+.performance { grid-template-columns: 1.25fr 1fr 1fr 1fr; }
+.record-control { min-width: 0; }
+#record { font-size: 14px; }
+#record-progress { width: 100%; height: 12px; accent-color: #17141a; }
+.motion-control { display: flex; flex-direction: column; justify-content: space-between; gap: 9px; }
+.motion-row { display: flex; align-items: center; gap: 12px; }
+.motion-dial { width: 54px; height: 54px; flex-shrink: 0; border-radius: 50%; background: #17141a; position: relative; touch-action: none; cursor: ns-resize; }
+.motion-dial i { position: absolute; inset: 5px; transform: rotate(var(--rotation, -135deg)); }
+.motion-dial i::before { content: ""; display: block; width: 4px; height: 15px; background: #c3ee67; margin: 0 auto; }
+#motion-value { font-size: 11px; font-weight: 700; }
+.quick-guide { font-size: 11px; line-height: 1.5; margin: 12px 0 0; }
+@media (max-width: 800px) { .performance { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .performance { grid-template-columns: 1fr; } }
+@media (min-width: 801px) and (max-height: 900px) {
+  #app { padding: 16px; }
+  .machine { padding: 22px; }
+  .masthead { margin-bottom: 14px; }
+  h1 { font-size: 54px; }
+  .transport { padding: 10px 18px; }
+  .transport-buttons button { height: 46px; }
+  .layers { margin: 16px 0; gap: 14px; }
+  .layer { padding: 12px; }
+  .select-track { padding: 12px 0 8px; }
+  .track-name { font-size: 34px; }
+  .phrase-strip { height: 10px; margin-bottom: 12px; }
+  .performance { padding: 14px; gap: 16px; }
+  .record-control { gap: 8px; padding-right: 12px; }
+  .motion-control { gap: 6px; }
+  .motion-dial { width: 44px; height: 44px; }
+  footer { padding-top: 10px; }
+}

@@ -8,6 +8,7 @@
     "start": "bun src/server.js",
     "stubs": "bun scripts/generate-stubs.js",
     "test": "bun test",
+    "test:recording": "bun tests/recording-flow.mjs",
     "test:browser": "bun tests/browser.mjs",
     "build": "bun scripts/build.js",
     "check": "bun scripts/check.js",

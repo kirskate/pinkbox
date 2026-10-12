@@ -117,7 +117,8 @@ try {
   assert.equal(final.sessions, 1);
   assert.equal(final.scheduleCount, 1);
   assert.equal(final.listeners, 1);
-  assert(final.voices <= 7, "Unbounded scheduled voices");
+  assert(final.voices <= 8, "Unbounded scheduled voices");
+  assert.equal(final.instruments, 8, "Expected bounded LIVE/LOOP graph");
   assert(longestSilent < 600, `Unexpected silent window: ${longestSilent}ms`);
   // Compare retained memory, not temporary allocation by the test's polling itself.
   await cdp.send("HeapProfiler.collectGarbage");

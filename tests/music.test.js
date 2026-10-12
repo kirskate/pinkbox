@@ -23,8 +23,7 @@ function recorded(state, role = "keys") {
   state.advance(0);
   expect(state.record()).toBe(true);
   advanceThrough(state, 1, 80);
-  expect(state.rec.phase).toBe("finalizing");
-  expect(state.commitRecording(state.rec.token, state.generation)).toBe(true);
+  expect(state.rec).toBe(null);
   return state.tracks[role].clip;
 }
 test("generator: 4000 reproducible bounded phrases, same C minor world", () => {
@@ -87,81 +86,39 @@ test("layer queued changes and double click cancellation, stopped selection reta
   state.finishStart(state.beginStart());
   expect(state.tracks.bass.active).toBe(true);
 });
-test("REC fixed target, 4 bars, emitted events only, atomic commit and exact repeats", () => {
-  const state = running();
-  state.advance(0);
-  state.record();
-  const target = state.rec.target;
-  state.select("bass");
-  expect(state.rec.target).toBe(target);
+test("REC fixed target, four bars, actual live events and exact loop repeats", () => {
+  const state = running(); state.advance(0); state.record();
+  const {start,end} = state.rec; state.select("bass");
   expect(state.record()).toBe(false);
-  const frames = advanceThrough(state, 1, 80);
-  expect(state.rec.end - state.rec.start).toBe(64);
-  expect(state.tracks.keys.clip).toBe(null);
-  const captured = frames.flatMap((frame, index) =>
-    index + 1 >= 16 && index + 1 < 80
-      ? frame.attacks
-          .filter((e) => e.role === "keys")
-          .map(({ role, ...event }) => ({
-            ...event,
-            tick: (index + 1 - 16) * STEP_TICKS,
-          }))
-      : [],
-  );
-  expect(state.rec.events).toEqual(captured);
-  const token = state.rec.token;
-  expect(state.commitRecording(token, state.generation)).toBe(true);
-  const clip = structuredClone(state.tracks.keys.clip);
-  const a = advanceThrough(state, 81, 144).flatMap((f) =>
-    f.attacks.filter((e) => e.role === "keys"),
-  );
-  const b = advanceThrough(state, 145, 208).flatMap((f) =>
-    f.attacks.filter((e) => e.role === "keys"),
-  );
-  expect(a).toEqual(b);
-  expect(state.tracks.keys.clip).toEqual(clip);
+  const frames = advanceThrough(state,1,end);
+  const captured = frames.flatMap((frame,index) => index+1>=start && index+1<end
+    ? frame.attacks.filter(e=>e.role==="keys" && e.source==="live").map(({role,source,...e})=>({...e,tick:(index+1-start)*STEP_TICKS,duration:Math.min(e.duration,(end-index-1)*STEP_TICKS)})) : []);
+  expect(end-start).toBe(64); expect(state.rec).toBe(null);
+  expect(state.tracks.keys.clip).toEqual(captured);
+  const first=advanceThrough(state,end+1,end+64).flatMap(f=>f.attacks.filter(e=>e.source==="loop"));
+  const second=advanceThrough(state,end+65,end+128).flatMap(f=>f.attacks.filter(e=>e.source==="loop"));
+  expect(first).toEqual(second);
 });
-test("REC replacement is safe under STOP, layer disable and stale finalization", () => {
-  for (const cancellation of ["stop", "off", "finalizing"]) {
-    const state = running();
-    const clip = structuredClone(recorded(state));
-    state.select("keys");
-    state.record();
-    if (cancellation === "finalizing") advanceThrough(state, 81, 160);
-    else advanceThrough(state, 81, 98);
-    const token = state.rec.token,
-      generation = state.generation;
-    if (cancellation === "off") state.toggle("keys");
-    else state.stop();
-    expect(state.tracks.keys.clip).toEqual(clip);
-    expect(state.rec).toBe(null);
-    expect(state.commitRecording(token, generation)).toBe(false);
-  }
+test("STOP cancels replacement and stale commits preserve old phrase",()=>{
+  const state=running(); const old=structuredClone(recorded(state));
+  state.record(); const token=state.rec.token, generation=state.generation;
+  advanceThrough(state,81,110);state.stop();
+  expect(state.rec).toBe(null); expect(state.tracks.keys.clip).toEqual(old);
+  expect(state.commitRecording(token,generation)).toBe(false);
 });
-test("successful replacement changes phrase without simultaneous old and new sources", () => {
-  const state = running();
-  const old = structuredClone(recorded(state));
-  state.record();
-  const start = state.rec.start;
-  const frames = advanceThrough(state, 81, start + 64);
-  expect(
-    frames
-      .find((_, i) => i + 81 === start)
-      .attacks.filter((e) => e.role === "keys").length,
-  ).toBe(1);
+test("replacement captures live while old loop plays independently",()=>{
+  const state=running();const old=structuredClone(recorded(state));
+  state.setMotion(100); state.record(); const end=state.rec.end;
+  const frames=advanceThrough(state,81,end-1);
   expect(state.tracks.keys.clip).toEqual(old);
-  state.commitRecording(state.rec.token, state.generation);
-  expect(state.tracks.keys.clip).not.toEqual(old);
+  expect(frames.some(f=>f.attacks.some(e=>e.source==="live") && f.attacks.some(e=>e.source==="loop"))).toBe(true);
+  state.advance(end);expect(state.tracks.keys.clip).not.toEqual(old);
+  expect(state.tracks.keys.active).toBe(false);
 });
-test("corrupt recording preserves saved phrase", () => {
-  const state = running();
-  const old = structuredClone(recorded(state));
-  state.record();
-  advanceThrough(state, 81, 160);
-  state.rec.events[0].notes = [61];
-  expect(state.commitRecording(state.rec.token, state.generation)).toBe(false);
-  expect(state.tracks.keys.clip).toEqual(old);
-  expect(state.error).toContain("Previous phrase kept");
+test("corrupt recording preserves previous loop",()=>{
+  const state=running();const old=structuredClone(recorded(state));state.record();
+  const end=state.rec.end;advanceThrough(state,81,end-1);state.rec.events[0].notes=[61];state.advance(end);
+  expect(state.tracks.keys.clip).toEqual(old);expect(state.error).toContain("Previous phrase kept");
 });
 test("BPM clamps and applies at bar, REC length stays ticks, notes unchanged", () => {
   const state = running();
@@ -174,7 +131,7 @@ test("BPM clamps and applies at bar, REC length stays ticks, notes unchanged", (
   expect(state.rec.end - state.rec.start).toBe(64);
   state.setBpm(60);
   advanceThrough(state, 17, 80);
-  state.commitRecording(state.rec.token, state.generation);
+  expect(state.rec).toBe(null);
   const clip = structuredClone(state.tracks.keys.clip);
   state.setBpm(999);
   advanceThrough(state, 81, 100);
@@ -189,11 +146,11 @@ test("STOP retains clips and selected layers; restart aligns origin zero", () =>
   const clip = structuredClone(recorded(state));
   state.stop();
   expect(state.tracks.keys.clip).toEqual(clip);
-  expect(state.tracks.keys.desired).toBe(true);
+  expect(state.tracks.keys.loopDesired).toBe(true);
   state.finishStart(state.beginStart());
   const frame = state.advance(0);
   expect(
-    frame.attacks.filter((e) => e.role === "keys").map(({ role, ...e }) => e),
+    frame.attacks.filter((e) => e.role === "keys").map(({ role, source, ...e }) => e),
   ).toEqual(clip.filter((e) => e.tick === 0));
 });
 test("filter mapping smooth logarithmic range without changing events", () => {
@@ -234,16 +191,16 @@ test("first REC captures live music without replacing it at the start boundary",
   expect(
     start.attacks
       .filter((e) => e.role === "keys")
-      .map(({ role, ...event }) => event),
+      .map(({ role, source, ...event }) => event),
   ).toEqual(initial.filter((event) => event.tick === 16 * STEP_TICKS));
   advanceThrough(state, 17, 79);
   const end = state.advance(80);
-  expect(state.tracks.keys.origin).toBe(16);
+  expect(state.tracks.keys.loopOrigin).toBe(16);
   expect(
     end.attacks
       .filter((e) => e.role === "keys")
-      .map(({ role, ...event }) => event),
-  ).toEqual(state.rec.events.filter((event) => event.tick === 0));
+      .map(({ role, source, ...event }) => event),
+  ).toEqual(state.tracks.keys.clip.filter((event) => event.tick === 0));
 });
 
 test("all four recording slots remain independent through sequential recordings", () => {
@@ -257,7 +214,7 @@ test("all four recording slots remain independent through sequential recordings"
     expect(state.record()).toBe(true);
     const end = state.rec.end;
     advanceThrough(state, state.step + 1, end);
-    state.commitRecording(state.rec.token, state.generation);
+    expect(state.rec).toBe(null);
     for (const [id, clip] of Object.entries(previous))
       expect(state.tracks[id].clip).toEqual(clip);
     previous[role] = structuredClone(state.tracks[role].clip);
@@ -265,18 +222,12 @@ test("all four recording slots remain independent through sequential recordings"
   }
 });
 
-test("cancelled replacement restores saved loop origin and double toggle cancels removal", () => {
-  const state = running();
-  recorded(state);
-  const oldOrigin = state.tracks.keys.origin;
-  state.record();
-  advanceThrough(state, 81, 100);
-  expect(state.tracks.keys.origin).not.toBe(oldOrigin);
-  state.toggle("keys");
-  state.toggle("keys");
-  expect(state.rec).toBe(null);
-  expect(state.tracks.keys.pending).toBe(null);
-  expect(state.tracks.keys.origin).toBe(oldOrigin);
+test("loop toggle cancellation and restart keep saved events",()=>{
+ const state=running();const old=structuredClone(recorded(state));
+ state.toggleLoop("keys");state.toggleLoop("keys");
+ state.advance(96);expect(state.tracks.keys.loopActive).toBe(true);
+ state.stop();state.finishStart(state.beginStart());expect(state.advance(0).attacks.some(e=>e.source==="loop")).toBe(true);
+ expect(state.tracks.keys.clip).toEqual(old);
 });
 
 test("ARP maintains the movement: no attack gap beyond an eighth note at 60 BPM", () => {

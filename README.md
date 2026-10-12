@@ -15,11 +15,13 @@ Open the address printed by the server. Audio starts only after PLAY. No externa
 
 ## Perform
 
-1. PLAY starts KEYS. Select a layer by its large name; ADD/REMOVE changes its activity on the next available bar.
-2. REC records the selected active layer from the next bar for four bars, then repeats its notes and rhythm. Other layers remain independent.
-3. Add BASS, ARP and SYNTH; select each to adjust FILTER. Master VOL controls the whole mix. BPM changes on a bar boundary, keeping pitch and the recording's musical length.
-4. REC again replaces that layer's phrase only after a successful recording. STOP or removing that layer cancels the candidate and keeps its previous saved phrase.
-5. Remove layers to end the performance, then STOP. PLAY restarts chosen layers from the beginning. Saved phrases remain until the page is reloaded.
+1. PLAY starts live KEYS. Select a role by its large name. LIVE enables/disables its generated performance on the next bar; LOOP independently enables/disables its saved phrase.
+2. Turn **LIVE KEYS · АККОРД → НОТЫ** to move from a full chord to separate notes: quarters, eighths, sixteenths. Drag the dial vertically, use the range, or use the arrow keys on the range. The instrument plays the rhythm for you.
+3. REC captures the selected role from the next bar for **four bars** (8 seconds at 120 BPM, after the wait). REC enables LIVE if needed. Switching LIVE off during capture lets the four-bar recording finish. STOP cancels it immediately.
+4. On successful capture, LOOP starts automatically and LIVE switches off. Turn LIVE back on to play over the saved loop. Turning LIVE off again leaves the loop playing. Motion changes affect live KEYS, not saved notes.
+5. Select BASS, ARP or SYNTH to add or record another role. FILTER changes both live and loop timbre of the selected role; VOL affects the whole mix. BPM changes on a bar boundary, keeping pitch and musical length.
+6. REC again records a new live candidate while the old loop remains independent (mute LOOP if desired). Successful completion replaces that role's slot; STOP/error preserves it. One saved phrase per role.
+7. Mute LIVE/LOOP layers to end the performance, then STOP. PLAY restarts selected sources from the beginning. Saved phrases last until page reload; REC stores notes and rhythm, not a downloadable audio file.
 
 The instrument stops safely when its tab is hidden or audio is interrupted. Press PLAY to resume from the beginning. Background performance is not supported.
 
@@ -30,6 +32,7 @@ bun test
 bun run check
 bun run build
 # With the dev server running and Chromium installed:
+bun run test:recording
 bun run test:browser
 bun run test:accessibility
 bun run test:audio

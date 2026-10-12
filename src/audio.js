@@ -63,20 +63,23 @@ export class AudioEngine {
     const gate = new Tone.Gain(0).connect(this.master);
     const tracks = {};
     try {
-      for (const { id } of ROLES) {
-        const filter = new Tone.Filter(
-          filterFrequency(this.state.tracks[id].filter),
-          "lowpass",
-        ).connect(gate);
-        tracks[id] = { instrument: null, filter, voices: [] };
-        tracks[id].instrument =
-          id === "keys"
-            ? new Tone.PolySynth({
-                voice: Tone.Synth,
-                maxPolyphony: 8,
-                options: TIMBRES[id],
-              }).connect(filter)
-            : new Tone.Synth(TIMBRES[id]).connect(filter);
+      for (const { id: role } of ROLES) {
+        for (const source of ["live", "loop"]) {
+          const id = source === "live" ? role : `${role}:loop`;
+          const filter = new Tone.Filter(
+            filterFrequency(this.state.tracks[role].filter),
+            "lowpass",
+          ).connect(gate);
+          tracks[id] = { instrument: null, filter, voices: [] };
+          tracks[id].instrument =
+            role === "keys"
+              ? new Tone.PolySynth({
+                  voice: Tone.Synth,
+                  maxPolyphony: 8,
+                  options: TIMBRES[role],
+                }).connect(filter)
+              : new Tone.Synth(TIMBRES[role]).connect(filter);
+        }
       }
     } catch (error) {
       for (const track of Object.values(tracks)) {
@@ -138,7 +141,7 @@ export class AudioEngine {
     }
   }
   release(track, role, time) {
-    if (role === "keys") track.instrument.releaseAll(time);
+    if (role.split(":")[0] === "keys") track.instrument.releaseAll(time);
     else track.instrument.triggerRelease(time);
     track.voices = [];
   }
@@ -157,7 +160,7 @@ export class AudioEngine {
         if (frame.cuts.includes(role)) this.release(track, role, time);
         const ending = track.voices.filter((voice) => voice.end <= step);
         for (const voice of ending) {
-          if (role === "keys")
+          if (role.split(":")[0] === "keys")
             track.instrument.triggerRelease(
               voice.notes.map((note) =>
                 Tone.Frequency(note, "midi").toFrequency(),
@@ -169,7 +172,8 @@ export class AudioEngine {
         track.voices = track.voices.filter((voice) => voice.end > step);
       }
       for (const event of frame.attacks) {
-        const track = session.tracks[event.role];
+        const channel = event.source === "loop" ? `${event.role}:loop` : event.role;
+        const track = session.tracks[channel];
         const notes = event.notes.map((note) =>
           Tone.Frequency(note, "midi").toFrequency(),
         );
@@ -196,23 +200,10 @@ export class AudioEngine {
           session.generation !== this.state.generation
         )
           return;
-        if (frame.finalize) {
-          this.state.commitRecording(
-            frame.finalize.token,
-            frame.finalize.generation,
-          );
-          // Keep the audible step while displaying the committed transaction.
-          snapshot.rec = this.state.snapshot().rec;
-          snapshot.tracks = snapshot.tracks.map((track) => ({
-            ...track,
-            saved: Boolean(this.state.tracks[track.id].clip),
-            eventCount: this.state.tracks[track.id].clip?.length ?? 0,
-          }));
-          snapshot.error = this.state.error;
-        }
         // Delayed audio confirmations must not undo a later UI selection or edit.
         snapshot.selected = this.state.selected;
         snapshot.volume = this.state.volume;
+        snapshot.motion = this.state.motion;
         snapshot.tracks = snapshot.tracks.map((track) => ({
           ...track,
           filter: this.state.tracks[track.id].filter,
@@ -254,6 +245,14 @@ export class AudioEngine {
     this.state.toggle(id);
     this.publish();
   }
+  toggleLoop(id) {
+    this.state.toggleLoop(id);
+    this.publish();
+  }
+  setMotion(value) {
+    this.state.setMotion(value);
+    this.publish();
+  }
   record() {
     this.state.record();
     this.publish();
@@ -271,6 +270,10 @@ export class AudioEngine {
     const track = this.state.tracks[this.state.selected];
     track.filter = clamp(value, 0, 100);
     this.session?.tracks[track.id].filter.frequency.rampTo(
+      filterFrequency(track.filter),
+      0.03,
+    );
+    this.session?.tracks[`${track.id}:loop`].filter.frequency.rampTo(
       filterFrequency(track.filter),
       0.03,
     );

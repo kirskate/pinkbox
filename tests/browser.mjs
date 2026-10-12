@@ -96,7 +96,7 @@ try {
     bpm: await evaluate((engine) => engine.state.bpm),
   });
   await wait((engine) =>
-    Object.values(engine.state.tracks).every((track) => track.active),
+    Object.values(engine.state.tracks).every((track) => track.active || track.loopActive),
   );
   const baselineStep = await evaluate((engine) => engine.state.step);
   await wait(
