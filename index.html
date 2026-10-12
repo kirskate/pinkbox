@@ -4,16 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PINKBOX</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Syne:wght@700;800&display=swap"
-      rel="stylesheet"
-    />
+    <meta name="theme-color" content="#f349a5" />
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+    <div id="app"><p role="status">LOADING PINKBOX…</p></div>
+    <noscript>Pinkbox needs JavaScript to play music.</noscript>
+    <script
+      type="module"
+      src="/src/main.js"
+      onerror="
+        document.getElementById('app').textContent =
+          'Pinkbox could not load. Reload the page to try again.'
+      "
+    ></script>
   </body>
 </html>

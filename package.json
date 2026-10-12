@@ -6,9 +6,20 @@
   "scripts": {
     "dev": "bun src/server.js",
     "start": "bun src/server.js",
-    "stubs": "bun scripts/generate-stubs.js"
+    "stubs": "bun scripts/generate-stubs.js",
+    "test": "bun test",
+    "test:browser": "bun tests/browser.mjs",
+    "build": "bun scripts/build.js",
+    "check": "bun scripts/check.js",
+    "test:stress": "bun tests/stress.mjs",
+    "test:accessibility": "bun tests/accessibility.mjs",
+    "test:audio": "bun tests/audio-matrix.mjs",
+    "test:performance": "bun tests/performance.mjs"
   },
   "dependencies": {
     "tone": "15.1.22"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.0"
   }
 }

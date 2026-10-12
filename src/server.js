@@ -1,34 +1,5 @@
-import { resolve } from "node:path";
-
+import { buildApp } from "./build.js";
 const PORT = Number(process.env.PORT) || 3000;
-const TONE_BROWSER_BUNDLE = resolve("node_modules/tone/build/Tone.js");
-
-async function bundleApp() {
-  const result = await Bun.build({
-    entrypoints: ["./src/main.js"],
-    target: "browser",
-    format: "esm",
-    plugins: [
-      {
-        name: "tone-browser-bundle",
-        setup(build) {
-          // Tone's ESM graph pulls automation-events without file extensions,
-          // which Bun cannot resolve. Use the prebuilt browser bundle instead.
-          build.onResolve({ filter: /^tone$/ }, () => ({
-            path: TONE_BROWSER_BUNDLE,
-          }));
-        },
-      },
-    ],
-  });
-
-  if (!result.success) {
-    const message = result.logs.map((log) => String(log)).join("\n");
-    throw new Error(message || "Build failed");
-  }
-
-  return result.outputs[0];
-}
 
 const server = Bun.serve({
   port: PORT,
@@ -50,7 +21,7 @@ const server = Bun.serve({
 
     if (path === "/src/main.js") {
       try {
-        const output = await bundleApp();
+        const output = await buildApp();
         return new Response(output, {
           headers: {
             "Content-Type": "text/javascript; charset=utf-8",
