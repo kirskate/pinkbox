@@ -1,22 +1,23 @@
 import {
   KEY_BINDINGS,
+  SLOT_COUNT,
   NOTE_NAMES,
   TIMBRE_NAMES,
   chordNotes,
 } from "./patterns.js";
 const degrees = ["I", "II", "III", "IV", "V", "VI", "VII", "I↑"];
 const knob = (id, title, max, labels) =>
-  `<div class="knob-control"><label for="${id}" class="label">${title}</label><div class="knob-wrap"><button class="dial" data-dial="${id}" tabindex="-1" aria-hidden="true" title="Тяни вверх/вниз"><i></i></button><output id="${id}-value" for="${id}">${labels[0]}</output></div><input id="${id}" type="range" min="0" max="${max}" step="1" value="0" aria-label="${title}"></div>`;
+  `<div class="knob-control"><label for="${id}" class="label">${title}</label><div class="knob-wrap"><button class="dial" data-dial="${id}" tabindex="-1" aria-hidden="true" title="Drag up/down"><i></i></button><output id="${id}-value" for="${id}">${labels[0]}</output></div><input id="${id}" type="range" min="0" max="${max}" step="1" value="0" aria-label="${title}"></div>`;
 export function createUI(root, engine) {
   root.innerHTML = `<main class="machine" aria-label="Pinkbox — клавиатурный инструмент и лупер">
-    <header class="masthead"><div class="brand">PINKBOX<span aria-hidden="true">✳</span><small>CHORDS · ARP · FIVE LOOPS</small></div>
-      <div class="transport"><button id="play" class="lime">▶ PLAY</button><button id="stop">■ STOP</button><label class="tempo">BPM<input id="bpm" type="number" min="60" max="160" value="120" aria-label="Темп BPM"></label><output id="position">01:01</output></div>
+    <header class="masthead"><div class="brand">PINKBOX<span aria-hidden="true"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 1v30M1 16h30M5 5l22 22M5 27L27 5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></span></div>
+      <div class="transport"><button id="play" class="lime">▶ PLAY</button><button id="stop">■ STOP</button><label class="tempo">BPM<input id="bpm" type="number" min="60" max="160" value="120" aria-label="Темп BPM"></label><output id="position" class="sr-only" aria-live="off">01:01</output></div>
       <label class="master label">MASTER VOL<input id="volume" type="range" min="0" max="100" value="75" aria-label="Общая громкость"><output id="volume-value">75%</output></label>
     </header>
     <section class="top-panel" aria-label="Управление живым голосом">
-      <section class="bass-module module"><div class="section-title">01 · BASS</div><div class="mode-buttons"><button data-mode="keys" aria-pressed="true">KEYS</button><button data-mode="bass" aria-pressed="false">BASS</button></div><button id="bass-link" class="small">LINK · клавиатура</button><div class="bass-pads"><button data-pad="0" aria-label="Басовый пэд первая ступень">I<small>ROOT</small></button><button data-pad="4" aria-label="Басовый пэд пятая ступень">V<small>FIFTH</small></button></div><span class="hint">Один живой голос</span></section>
-      <section class="chord-module module"><div class="section-title">02 · CHORD BUILDER</div><div class="tonality"><label>KEY<select id="key" aria-label="Тональность">${NOTE_NAMES.map((name, i) => `<option value="${i}">${name}</option>`).join("")}</select></label><label>SCALE<select id="scale" aria-label="Гамма"><option value="minor">MINOR</option><option value="major">MAJOR</option></select></label></div>${knob("richness", "CHORD · состав", 2, ["TRIAD"])}<div class="display"><span id="chord-name">C MINOR</span><output id="chord-notes">УДЕРЖИВАЙ КЛАВИШУ</output><span id="voice-status">LIVE · KEYS</span></div></section>
-      <section class="arp-module module"><div class="section-title">03 · ARPEGGIATOR</div>${knob("arp", "ARP · аккорд → ноты", 3, ["CHORD"])}<div class="directions">${[
+      <section class="bass-module module"><div class="section-title">01 · BASS</div><div class="mode-buttons"><button data-mode="keys" aria-pressed="true">KEYS</button><button data-mode="bass" aria-pressed="false">BASS</button></div><button id="bass-link" class="small">LINK</button><div class="bass-pads"><button data-pad="0" aria-label="Басовый пэд первая ступень">I<small>ROOT</small></button><button data-pad="4" aria-label="Басовый пэд пятая ступень">V<small>FIFTH</small></button></div></section>
+      <section class="chord-module module"><div class="section-title">02 · CHORD BUILDER</div><div class="tonality"><label>KEY<select id="key" aria-label="Тональность">${NOTE_NAMES.map((name, i) => `<option value="${i}">${name}</option>`).join("")}</select></label><label>SCALE<select id="scale" aria-label="Гамма"><option value="minor">MINOR</option><option value="major">MAJOR</option></select></label></div>${knob("richness", "CHORD", 2, ["TRIAD"])}<div class="display"><span id="chord-name">C MINOR</span><output id="chord-notes" class="sr-only" aria-live="off"></output><span id="voice-status">LIVE · KEYS</span></div></section>
+      <section class="arp-module module"><div class="section-title">03 · ARPEGGIATOR</div>${knob("arp", "ARP", 3, ["CHORD"])}<details id="arp-options" class="arp-options"><summary aria-label="ARP direction options">···</summary><div class="directions">${[
         ["up", "↑ UP"],
         ["down", "↓ DOWN"],
         ["updown", "↕ UP/DOWN"],
@@ -25,13 +26,11 @@ export function createUI(root, engine) {
           ([id, name]) =>
             `<button data-direction="${id}" aria-pressed="${id === "up"}">${name}</button>`,
         )
-        .join(
-          "",
-        )}</div><span class="hint">Заменяет аккорд · общий BPM</span></section>
-      <section class="synth-module module"><div class="section-title">04 · SYNTH</div>${knob("timbre", "TONE · тембр", 2, ["SOFT"])}${knob("filter", "FILTER · яркость", 100, ["100%"])}<span class="hint">Меняет только живой голос</span></section>
+        .join("")}</div></details></section>
+      <section class="synth-module module"><div class="section-title">04 · SYNTH</div>${knob("timbre", "TONE", TIMBRE_NAMES.length - 1, ["SOFT"])}${knob("filter", "FILTER", 100, ["100%"])}</section>
     </section>
     <section class="lower-panel">
-      <section class="keyboard-module module" aria-label="Клавиатура инструмента"><div class="section-title">KEYBOARD <span>Удерживай · отпусти · запиши</span></div><div class="keyboard">
+      <section class="keyboard-module module" aria-label="Клавиатура инструмента"><div class="section-title">KEYBOARD </div><div class="keyboard">
         <div class="white-keys">${Object.entries(KEY_BINDINGS)
           .filter(([, p]) => !p.black)
           .map(
@@ -46,12 +45,12 @@ export function createUI(root, engine) {
               `<button class="piano-key black" data-key="${code}" style="--boundary:${p.degree + 1}" aria-label="Дополнительный мажорный аккорд, клавиша ${code.slice(3)}"><span class="note-label"></span><kbd>${code.slice(3)}</kbd></button>`,
           )
           .join("")}
-      </div><p class="keyboard-help">A S D F G H J K · ступени гаммы<br>W E T Y U · дополнительные мажорные аккорды</p></section>
-      <section class="loop-module module" aria-label="Пять записанных дорожек"><div class="loop-header"><div><span class="section-title">05 · LOOPER</span><span id="slot-count">0 / 5</span></div><button id="record" class="record">● REC · 4 ТАКТА</button></div><div class="rec-status"><span id="record-status" role="status" aria-live="polite">REC → четыре такта → новая дорожка</span><progress id="record-progress" max="64" value="0" aria-label="Прогресс записи"></progress></div>
-        <div class="loop-slots">${Array.from({ length: 5 }, (_, i) => `<div class="loop-row" data-slot="${i}"><span class="slot-number">0${i + 1}</span><button data-loop="${i}" aria-label="Включить дорожку ${i + 1}" disabled>▶</button><span class="clip-name" id="clip-${i}">СВОБОДНО</span><label class="loop-volume"><input data-volume="${i}" type="range" min="0" max="100" value="75" aria-label="Громкость дорожки ${i + 1}" disabled><output id="vol-${i}">—</output></label><button data-delete="${i}" class="delete" aria-label="Удалить дорожку ${i + 1}" disabled>×</button></div>`).join("")}</div>
-        <div class="loop-footer"><span>Записи живут до перезагрузки страницы</span><button id="reset" class="small">RESET ALL</button></div>
+      </div></section>
+      <section class="loop-module module" aria-label="Четыре записанные дорожки"><div class="loop-header"><div><span class="section-title">05 · LOOPER</span><span id="slot-count">0 / 4</span></div><button id="record" class="record">● REC · 4 BARS</button></div><div class="rec-status"><span id="record-status" role="status" aria-live="polite"></span><progress id="record-progress" max="64" value="0" aria-label="Прогресс записи"></progress></div>
+        <div class="loop-slots">${Array.from({ length: SLOT_COUNT }, (_, i) => `<div class="loop-row" data-slot="${i}"><span class="slot-number">0${i + 1}</span><button data-loop="${i}" aria-label="Включить дорожку ${i + 1}" disabled>▶</button><span class="clip-name" id="clip-${i}">EMPTY</span><label class="loop-volume"><input data-volume="${i}" type="range" min="0" max="100" value="75" aria-label="Громкость дорожки ${i + 1}" disabled><output id="vol-${i}">—</output></label><button data-delete="${i}" class="delete" aria-label="Удалить дорожку ${i + 1}" disabled>×</button></div>`).join("")}</div>
+        <div class="loop-footer"><button id="reset" class="small">RESET ALL</button></div>
       </section>
-    </section><footer><span id="status">READY · нажми и удерживай A</span><span id="tempo-pending"></span><span>MAKE IT MOVE ↗</span></footer><p id="error" role="alert" hidden></p>
+    </section><footer class="sr-only"><span id="status">READY · нажми и удерживай A</span><span id="tempo-pending"></span></footer><p id="error" role="alert" hidden></p>
   </main>`;
   const get = (id) => root.querySelector(`#${id}`);
   const cleanups = [];
@@ -79,7 +78,7 @@ export function createUI(root, engine) {
   const controls = {
     richness: ["setRichness", 2],
     arp: ["setArp", 3],
-    timbre: ["setTimbre", 2],
+    timbre: ["setTimbre", TIMBRE_NAMES.length - 1],
     filter: [null, 100],
   };
   for (const [id, [method, max]] of Object.entries(controls)) {
@@ -260,7 +259,7 @@ export function createUI(root, engine) {
         b.setAttribute("aria-pressed", String(b.dataset.mode === state.mode)),
       );
     get("bass-link").textContent =
-      state.bassMode === "link" ? "LINK · клавиатура" : "MANUAL · пэды";
+      state.bassMode === "link" ? "LINK" : "MANUAL";
     get("chord-name").textContent =
       `${NOTE_NAMES[state.tonic]} ${state.scale.toUpperCase()}`;
     get("chord-notes").textContent = state.notes.length
@@ -290,28 +289,25 @@ export function createUI(root, engine) {
         ];
     });
     const count = state.slots.filter(Boolean).length;
-    get("slot-count").textContent = `${count} / 5`;
-    get("record").disabled = !running || Boolean(state.rec) || count === 5;
+    get("slot-count").textContent = `${count} / ${SLOT_COUNT}`;
+    get("record").disabled =
+      !running || Boolean(state.rec) || count === SLOT_COUNT;
     get("record").classList.toggle(
       "recording",
       state.rec?.phase === "recording",
     );
     get("record").textContent = state.rec
       ? state.rec.phase === "armed"
-        ? "◌ ЖДЁМ ТАКТ"
-        : "● ЗАПИСЬ"
-      : count === 5
-        ? "5 / 5 · ЗАНЯТО"
-        : "● REC · 4 ТАКТА";
+        ? "◌ WAIT"
+        : "● REC"
+      : count === SLOT_COUNT
+        ? "FULL"
+        : "● REC · 4 BARS";
     const recText = state.rec
       ? state.rec.phase === "armed"
-        ? `ДОРОЖКА ${state.rec.index + 1} · старт на такте`
-        : `ДОРОЖКА ${state.rec.index + 1} · ${Math.min(4, Math.floor((state.step - state.rec.start) / 16) + 1)} / 4 ТАКТА`
-      : count === 5
-        ? "Удали дорожку, чтобы записать новую"
-        : count
-          ? "Запись повторяется · играй поверх"
-          : "REC → четыре такта → новая дорожка";
+        ? `LOOP ${state.rec.index + 1} · NEXT BAR`
+        : `REC ${Math.min(4, Math.floor((state.step - state.rec.start) / 16) + 1)} / 4`
+      : "";
     if (recText !== lastRecText) {
       get("record-status").textContent = recText;
       lastRecText = recText;
@@ -334,8 +330,8 @@ export function createUI(root, engine) {
         `${slot?.enabled ? "Выключить" : "Включить"} дорожку ${i + 1}`,
       );
       get(`clip-${i}`).textContent = slot
-        ? `${slot.settings.timbre === "bass" ? "BASS" : TIMBRE_NAMES[slot.settings.timbre]} · 4 ТАКТА`
-        : "СВОБОДНО";
+        ? `${slot.settings.timbre === "bass" ? "BASS" : TIMBRE_NAMES[slot.settings.timbre]}`
+        : "EMPTY";
       const range = row.querySelector("input");
       range.disabled = !slot;
       range.value = slot?.volume ?? 75;

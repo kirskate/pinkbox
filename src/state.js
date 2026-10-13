@@ -1,5 +1,7 @@
 import {
   BAR_STEPS,
+  SLOT_COUNT,
+  TIMBRE_NAMES,
   PHRASE_STEPS,
   STEP_TICKS,
   chordNotes,
@@ -37,7 +39,7 @@ export class PerformanceState {
     this.live = { notes: [], signature: "", end: Infinity };
     this.arpOrigin = 0;
     this.arpCount = 0;
-    this.slots = Array(5).fill(null);
+    this.slots = Array(SLOT_COUNT).fill(null);
     this.serial = 0;
     this.rec = null;
     this.deleted = [];
@@ -93,7 +95,7 @@ export class PerformanceState {
     if (["up", "down", "updown"].includes(value)) this.direction = value;
   }
   setTimbre(value) {
-    this.timbre = clamp(value, 0, 2);
+    this.timbre = clamp(value, 0, TIMBRE_NAMES.length - 1);
   }
   setMode(value) {
     if (["keys", "bass"].includes(value)) this.mode = value;

@@ -21,7 +21,52 @@ export const SCALES = {
   minor: [0, 2, 3, 5, 7, 8, 10],
   major: [0, 2, 4, 5, 7, 9, 11],
 };
-export const TIMBRE_NAMES = ["SOFT", "GLASS", "ANALOG"];
+export const SLOT_COUNT = 4;
+export const TIMBRE_NAMES = [
+  "SOFT",
+  "GLASS",
+  "ANALOG",
+  "PLUCK",
+  "ORGAN",
+  "AIR",
+];
+export const TONE_PRESETS = [
+  {
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.025, decay: 0.3, sustain: 0.55, release: 0.12 },
+    volume: -23,
+  },
+  {
+    oscillator: { type: "sine" },
+    envelope: { attack: 0.008, decay: 0.3, sustain: 0.45, release: 0.16 },
+    volume: -22,
+  },
+  {
+    oscillator: { type: "sawtooth" },
+    envelope: { attack: 0.018, decay: 0.25, sustain: 0.4, release: 0.12 },
+    volume: -27,
+  },
+  {
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.004, decay: 0.22, sustain: 0.22, release: 0.09 },
+    volume: -19,
+  },
+  {
+    oscillator: { type: "custom", partials: [1, 0.5, 0.25, 0.12] },
+    envelope: { attack: 0.012, decay: 0.15, sustain: 0.75, release: 0.1 },
+    volume: -25,
+  },
+  {
+    oscillator: { type: "fatsine", count: 3, spread: 18 },
+    envelope: { attack: 0.08, decay: 0.35, sustain: 0.5, release: 0.2 },
+    volume: -25,
+  },
+];
+export const BASS_PRESET = {
+  oscillator: { type: "custom", partials: [1, 0.28, 0.12] },
+  envelope: { attack: 0.018, decay: 0.18, sustain: 0.82, release: 0.14 },
+  volume: -12,
+};
 export const KEY_BINDINGS = {
   KeyA: { degree: 0, black: false },
   KeyW: { degree: 0, black: true },

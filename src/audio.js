@@ -1,28 +1,14 @@
 import * as Tone from "tone";
-import { PPQ, STEP_TICKS, filterFrequency } from "./patterns.js";
+import {
+  PPQ,
+  STEP_TICKS,
+  SLOT_COUNT,
+  TONE_PRESETS,
+  BASS_PRESET,
+  filterFrequency,
+} from "./patterns.js";
 import { PerformanceState, clamp } from "./state.js";
-const PRESETS = {
-  0: {
-    oscillator: { type: "triangle" },
-    envelope: { attack: 0.025, decay: 0.3, sustain: 0.55, release: 0.12 },
-    volume: -23,
-  },
-  1: {
-    oscillator: { type: "sine" },
-    envelope: { attack: 0.008, decay: 0.3, sustain: 0.45, release: 0.16 },
-    volume: -22,
-  },
-  2: {
-    oscillator: { type: "sawtooth" },
-    envelope: { attack: 0.018, decay: 0.25, sustain: 0.4, release: 0.12 },
-    volume: -27,
-  },
-  bass: {
-    oscillator: { type: "triangle" },
-    envelope: { attack: 0.008, decay: 0.12, sustain: 0.7, release: 0.08 },
-    volume: -19,
-  },
-};
+const PRESETS = { ...TONE_PRESETS, bass: BASS_PRESET };
 export class AudioEngine {
   constructor() {
     this.state = new PerformanceState();
@@ -62,7 +48,10 @@ export class AudioEngine {
     const gate = new Tone.Gain(0).connect(this.master);
     const channels = {};
     try {
-      for (const id of ["live", "loop0", "loop1", "loop2", "loop3", "loop4"]) {
+      for (const id of [
+        "live",
+        ...Array.from({ length: SLOT_COUNT }, (_, index) => `loop${index}`),
+      ]) {
         const gain = new Tone.Gain(id === "live" ? 1 : 0).connect(gate);
         const filter = new Tone.Filter(18000, "lowpass").connect(gain);
         channels[id] = {

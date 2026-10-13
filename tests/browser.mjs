@@ -5,7 +5,7 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
   args: ["--no-sandbox"],
 });
-const page = await browser.newPage({ viewport: { width: 1512, height: 850 } });
+const page = await browser.newPage({ viewport: { width: 1502, height: 640 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("console", (m) => {
@@ -74,6 +74,12 @@ try {
   await wait(() => __engine.state.live.notes[0] === 60);
   await page.click("#record");
   await wait(() => __engine.state.rec?.phase === "recording");
+  assert(
+    await page.evaluate(
+      () => document.documentElement.scrollHeight <= innerHeight,
+    ),
+    "Recording overflows 1502px viewport",
+  );
   const start = Date.now();
   await wait(() => Boolean(__engine.state.slots[0]));
   const elapsed = Date.now() - start;
@@ -92,7 +98,7 @@ try {
     { ms: elapsed },
   );
   await page.selectOption("#key", "2");
-  await setRange("timbre", 2);
+  await setRange("timbre", 5);
   assert.deepEqual(
     await evalEngine(() => __engine.state.slots[0].events),
     first.events,
@@ -105,7 +111,9 @@ try {
   await wait(() => __engine.state.live.notes.length > 0);
   await setRange("arp", 3);
   await wait(() => __engine.state.live.notes.length === 1);
+  await page.click("#arp-options summary");
   await page.click('[data-direction="updown"]');
+  await page.click("#arp-options summary");
   assert.equal(await evalEngine(() => __engine.state.direction), "updown");
   await page.locator("#bpm").fill("160");
   await page.locator("#bpm").press("Tab");
@@ -156,14 +164,10 @@ try {
   await page.click("#record");
   await wait(() => Boolean(__engine.state.slots[3]));
   await page.keyboard.up("f");
-  await page.keyboard.down("g");
-  await page.click("#record");
-  await wait(() => Boolean(__engine.state.slots[4]));
-  await page.keyboard.up("g");
   assert(await page.locator("#record").isDisabled());
-  assert.equal(await page.locator("#slot-count").textContent(), "5 / 5");
+  assert.equal(await page.locator("#slot-count").textContent(), "4 / 4");
   pass(
-    "five genuine recordings, richness, black chords, manual pads, REC capacity guard",
+    "four genuine recordings, richness, black chords, manual pads, REC capacity guard",
   );
   await page.locator('[data-volume="0"]').evaluate((input) => {
     input.value = 25;
@@ -176,13 +180,13 @@ try {
     await evalEngine(() => __engine.state.slots[0].events),
     first.events,
   );
-  await page.click('[data-delete="4"]');
-  assert.equal(await evalEngine(() => __engine.state.slots[4]), null);
+  await page.click('[data-delete="3"]');
+  assert.equal(await evalEngine(() => __engine.state.slots[3]), null);
   assert(!(await page.locator("#record").isDisabled()));
   pass("individual mute, volume, deletion and reusable slot");
   await page.keyboard.down("a");
   await page.click("#record");
-  await wait(() => Boolean(__engine.state.slots[4]));
+  await wait(() => Boolean(__engine.state.slots[3]));
   await setRange("volume", 100);
   let peak = 0;
   for (let i = 0; i < 12; i++) {
@@ -190,8 +194,8 @@ try {
     await page.waitForTimeout(80);
   }
   assert(peak > 0.0001 && peak < 0.95);
-  assert.equal(await evalEngine(() => __engine.diagnostics().instruments), 6);
-  pass("five loops plus live, bounded audio graph and headroom", { peak });
+  assert.equal(await evalEngine(() => __engine.diagnostics().instruments), 5);
+  pass("four loops plus live, bounded audio graph and headroom", { peak });
   await page.keyboard.up("a");
   await page.click("#stop");
   await page.waitForTimeout(40);
@@ -218,7 +222,7 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await wait(() => __engine.state.live.notes.length === 0);
   await page.keyboard.up("a");
-  await page.click('[data-delete="4"]');
+  await page.click('[data-delete="3"]');
   await page.click("#record");
   await wait(() => Boolean(__engine.state.rec));
   await page.click("#stop");
@@ -229,9 +233,12 @@ try {
     0,
   );
   assert.equal(await evalEngine(() => __engine.state.status), "stopped");
-  pass("lost focus releases keys, STOP cancels REC, RESET clears five slots");
+  pass("lost focus releases keys, STOP cancels REC, RESET clears four slots");
   const geometries = [];
   for (const [width, height] of [
+    [1502, 640],
+    [1502, 700],
+    [1280, 640],
     [1512, 850],
     [1280, 720],
     [1024, 768],

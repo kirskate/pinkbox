@@ -19,9 +19,9 @@ function capture(s) {
   through(s, s.step + 1, end);
   return s.slots.find(Boolean);
 }
-test("five empty recording slots and no generated music on PLAY", () => {
+test("four empty recording slots and no generated music on PLAY", () => {
   const s = running();
-  expect(s.slots).toEqual([null, null, null, null, null]);
+  expect(s.slots).toEqual([null, null, null, null]);
   expect(s.advance(1).attacks).toEqual([]);
 });
 test("held degree follows tonality and release stops only live voice", () => {
@@ -58,10 +58,10 @@ test("saved notes and timbre remain fixed after live changes", () => {
   expect(s.slots[0].events).toEqual(clip.events);
   expect(s.slots[0].settings).toEqual(clip.settings);
 });
-test("five additive recordings; deletion frees a slot; reset clears all", () => {
+test("four additive recordings; deletion frees a slot; reset clears all", () => {
   const s = running();
-  for (let i = 0; i < 5; i++) capture(s);
-  expect(s.slots.filter(Boolean).length).toBe(5);
+  for (let i = 0; i < 4; i++) capture(s);
+  expect(s.slots.filter(Boolean).length).toBe(4);
   expect(s.record()).toBe(false);
   s.deleteSlot(2);
   expect(s.record()).toBe(true);
@@ -210,4 +210,14 @@ test("invalid note data and durations cannot become loop data; filter is bounded
   expect(validClip([{ tick: 0, duration: 3072, notes: [NaN] }])).toBe(false);
   expect(validClip([{ tick: 48, duration: 3072, notes: [60] }])).toBe(false);
   expect(filterFrequency(50)).toBe(1800);
+});
+
+import { TIMBRE_NAMES } from "../src/patterns.js";
+test("six selectable timbres retain the selected sound in new recordings", () => {
+  expect(TIMBRE_NAMES).toHaveLength(6);
+  const state = running();
+  state.setTimbre(5);
+  expect(state.timbre).toBe(5);
+  const clip = capture(state);
+  expect(clip.settings.timbre).toBe(5);
 });

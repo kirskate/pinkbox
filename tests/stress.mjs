@@ -19,8 +19,8 @@ try {
   });
   await page.keyboard.down("a");
   await page.waitForFunction(() => e.state.status === "running");
-  // Five real four-bar recordings, no fabricated loop fixtures.
-  for (let i = 0; i < 5; i++) {
+  // Four real four-bar recordings, no fabricated loop fixtures.
+  for (let i = 0; i < 4; i++) {
     await page.click("#record");
     await page.waitForFunction((i) => Boolean(e.state.slots[i]), i, {
       timeout: 12000,
@@ -53,7 +53,7 @@ try {
     });
     assert.equal(result.diag.snapshot.status, "running");
     assert.equal(result.diag.sessions, 1);
-    assert.equal(result.diag.instruments, 6);
+    assert.equal(result.diag.instruments, 5);
     assert.equal(result.diag.scheduleCount, 1);
     assert.equal(result.diag.listeners, 1);
     assert(result.peak < 0.95);
@@ -70,9 +70,9 @@ try {
       await page.evaluate((edit) => {
         e.edit("setKey", edit % 12);
         e.edit("setArp", edit % 4);
-        e.edit("setTimbre", edit % 3);
+        e.edit("setTimbre", edit % 6);
         e.setFilter(30 + (edit % 7) * 10);
-        e.setSlotVolume(edit % 5, 30 + (edit % 7) * 10);
+        e.setSlotVolume(edit % 4, 30 + (edit % 7) * 10);
         e.setBpm([60, 120, 160][edit % 3]);
       }, edit);
     }
@@ -96,8 +96,8 @@ try {
     peak,
     retainedHeapBytes: retained,
     lastStep,
-    loops: 5,
-    channels: 6,
+    loops: 4,
+    channels: 5,
     errors,
   };
   await Bun.write(

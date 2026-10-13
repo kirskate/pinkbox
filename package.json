@@ -11,6 +11,7 @@
     "test:browser": "bun tests/browser.mjs",
     "build": "bun scripts/build.js",
     "check": "bun scripts/check.js",
+    "test:sounds": "bun tests/sounds.mjs",
     "test:stress": "bun tests/stress.mjs",
     "test:accessibility": "bun tests/accessibility.mjs"
   },
