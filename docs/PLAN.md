@@ -73,3 +73,11 @@
 Внешний MIDI/FX, два сэмпловых банка и sample start, PCM-export, IndexedDB/восстановление, reverb/delay/swing не реализуются скрытыми заглушками. Продуктовых вопросов, блокирующих выбранную версию, нет; текущие ограничения записаны явно.
 
 Исходная версия остаётся в опубликованной `legacy-pinkbox` на `422b9458e61d6b80286068e97bf3ccacbaf32ddb`; предыдущая версия LIVE/LOOP — коммит `0256ee40c81875889ecaebc49b91f4bf97bfafc1` в истории main.
+
+## Публичная публикация — GitHub Pages
+
+Подготовлен `.github/workflows/pages.yml`: frozen install, syntax/unit/build, Pages artifact и deploy, push main/workflow_dispatch. Публикуется только статичный dist; настройки музыкальной модели не меняются.
+
+Проверено: YAML разбирается Bun, 18 unit tests и build прошли; статичная сборка обслужена под `/pinkbox/`, Chromium загрузил HTML/CSS/JS без ошибок и воспроизвёл реальный звук после клавиатурного действия.
+
+Включение Pages через GitHub API заблокировано ответом `Forbidden`. Требуется действие владельца в Settings → Pages → Source: GitHub Actions, затем запуск/повтор workflow. Ожидаемый адрес — https://kirskate.github.io/pinkbox/; он не объявляется уже опубликованным без успешного GitHub deployment. После включения дальнейшие push в main публикуются автоматически.

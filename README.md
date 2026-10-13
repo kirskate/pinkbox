@@ -53,3 +53,11 @@ bun run test:stress
 See [SPEC](docs/SPEC.md), [ARCHITECTURE](docs/ARCHITECTURE.md), [PLAN](docs/PLAN.md). Only desktop Chromium/Linux is automatically verified; real MacBook/Safari/mobile audio and subjective sound/design approval remain open. Sample-bank blending, external MIDI/FX, persistence and audio export are deferred.
 
 The original project remains in `legacy-pinkbox` at `422b9458e61d6b80286068e97bf3ccacbaf32ddb`. Previous groovebox revisions remain in Git history. Current development continues in `main`.
+
+## Publish with GitHub Pages
+
+The included `Publish Pinkbox` workflow builds and deploys `main` to GitHub Pages. A repository administrator must first open **Settings → Pages → Build and deployment → Source → GitHub Actions**. Then open **Actions → Publish Pinkbox → Run workflow**, select `main`, and start it (or re-run the initial publication after enabling Pages).
+
+After the workflow completes successfully, the public address is **https://kirskate.github.io/pinkbox/**. Future pushes to `main` update the site automatically. The static build uses relative CSS/JS paths, so it works under `/pinkbox/`. Visitors do not need Bun or a local server; audio still requires a keyboard/button gesture, and their recordings are temporary in their own browser tab.
+
+The GitHub API was unavailable from the development environment (`Forbidden`), so enabling Pages and verifying the first public deployment must be done in GitHub. The intended address is not proof that deployment has finished.
