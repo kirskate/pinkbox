@@ -1,49 +1,48 @@
 import * as Tone from "tone";
-import { ROLES, PPQ, STEP_TICKS, filterFrequency } from "./patterns.js";
+import { PPQ, STEP_TICKS, filterFrequency } from "./patterns.js";
 import { PerformanceState, clamp } from "./state.js";
-
-const TIMBRES = {
-  keys: {
+const PRESETS = {
+  0: {
     oscillator: { type: "triangle" },
-    envelope: { attack: 0.025, decay: 0.4, sustain: 0.32, release: 0.25 },
-    volume: -15,
+    envelope: { attack: 0.025, decay: 0.3, sustain: 0.55, release: 0.12 },
+    volume: -23,
   },
-  synth: {
+  1: {
     oscillator: { type: "sine" },
-    envelope: { attack: 0.03, decay: 0.25, sustain: 0.4, release: 0.18 },
-    volume: -16,
+    envelope: { attack: 0.008, decay: 0.3, sustain: 0.45, release: 0.16 },
+    volume: -22,
+  },
+  2: {
+    oscillator: { type: "sawtooth" },
+    envelope: { attack: 0.018, decay: 0.25, sustain: 0.4, release: 0.12 },
+    volume: -27,
   },
   bass: {
     oscillator: { type: "triangle" },
-    envelope: { attack: 0.008, decay: 0.15, sustain: 0.48, release: 0.08 },
-    volume: -13,
-  },
-  arp: {
-    oscillator: { type: "triangle" },
-    envelope: { attack: 0.005, decay: 0.08, sustain: 0.15, release: 0.07 },
-    volume: -20,
+    envelope: { attack: 0.008, decay: 0.12, sustain: 0.7, release: 0.08 },
+    volume: -19,
   },
 };
 export class AudioEngine {
   constructor() {
-    this.state = new PerformanceState(Math.floor(Math.random() * 0xffffffff));
+    this.state = new PerformanceState();
     this.listeners = new Set();
     this.transport = Tone.getTransport();
     this.transport.PPQ = PPQ;
     this.transport.timeSignature = 4;
+    this.context = Tone.getContext();
+    this.context.lookAhead = 0.04;
+    this.context.updateInterval = 0.01;
     this.session = null;
     this.master = null;
     this.retired = new Set();
     this.scheduleId = null;
-    this.history = [];
     this.createdSessions = 0;
     this.disposedSessions = 0;
-    this.context = Tone.getContext();
-    this.context.lookAhead = 0.06;
-    this.context.updateInterval = 0.02;
+    this.history = [];
     this.onContextState = () => {
       if (this.state.status === "running" && this.context.state !== "running")
-        this.stop("Audio was interrupted. Press PLAY to continue.");
+        this.stop("Звук прерван. Нажми PLAY.");
     };
     this.context.on("statechange", this.onContextState);
   }
@@ -61,44 +60,50 @@ export class AudioEngine {
         (this.state.volume / 100) * 0.8,
       ).toDestination();
     const gate = new Tone.Gain(0).connect(this.master);
-    const tracks = {};
+    const channels = {};
     try {
-      for (const { id: role } of ROLES) {
-        for (const source of ["live", "loop"]) {
-          const id = source === "live" ? role : `${role}:loop`;
-          const filter = new Tone.Filter(
-            filterFrequency(this.state.tracks[role].filter),
-            "lowpass",
-          ).connect(gate);
-          tracks[id] = { instrument: null, filter, voices: [] };
-          tracks[id].instrument =
-            role === "keys"
-              ? new Tone.PolySynth({
-                  voice: Tone.Synth,
-                  maxPolyphony: 8,
-                  options: TIMBRES[role],
-                }).connect(filter)
-              : new Tone.Synth(TIMBRES[role]).connect(filter);
-        }
+      for (const id of ["live", "loop0", "loop1", "loop2", "loop3", "loop4"]) {
+        const gain = new Tone.Gain(id === "live" ? 1 : 0).connect(gate);
+        const filter = new Tone.Filter(18000, "lowpass").connect(gain);
+        channels[id] = {
+          gain,
+          filter,
+          synth: null,
+          end: Infinity,
+          sounding: false,
+          preset: null,
+          cutoff: null,
+        };
+        channels[id].synth = new Tone.PolySynth({
+          voice: Tone.Synth,
+          maxPolyphony: 16,
+          options: PRESETS[0],
+        }).connect(filter);
       }
     } catch (error) {
-      for (const track of Object.values(tracks)) {
-        track.instrument?.dispose();
-        track.filter.dispose();
+      for (const channel of Object.values(channels)) {
+        channel.synth?.dispose();
+        channel.filter.dispose();
+        channel.gain.dispose();
       }
       gate.dispose();
       throw error;
     }
     this.createdSessions++;
-    return { gate, tracks, generation: this.state.generation, disposed: false };
+    return {
+      gate,
+      channels,
+      generation: this.state.generation,
+      disposed: false,
+    };
   }
   disposeSession(session) {
     if (!session || session.disposed) return;
     session.disposed = true;
-    for (const track of Object.values(session.tracks)) {
-      track.instrument.dispose();
-      track.filter.dispose();
-      track.voices = [];
+    for (const c of Object.values(session.channels)) {
+      c.synth.dispose();
+      c.filter.dispose();
+      c.gain.dispose();
     }
     session.gate.dispose();
     this.retired.delete(session);
@@ -113,7 +118,7 @@ export class AudioEngine {
       await Tone.start();
       if (generation !== this.state.generation) return;
       if (this.context.state !== "running")
-        throw new Error("Browser could not enable audio");
+        throw new Error("Браузер не разрешил звук");
       candidate = this.createSession();
       if (!this.state.finishStart(generation)) {
         this.disposeSession(candidate);
@@ -131,19 +136,32 @@ export class AudioEngine {
       const start = Tone.now();
       candidate.gate.gain.setValueAtTime(1, start);
       this.transport.start(start, 0);
-      // The first Draw confirmation displays RUNNING at the audible start.
     } catch (error) {
       if (generation !== this.state.generation) {
         this.disposeSession(candidate);
         return;
       }
-      this.stop(`Audio could not start: ${error.message}`);
+      this.stop(`Не удалось включить звук: ${error.message}`);
     }
   }
-  release(track, role, time) {
-    if (role.split(":")[0] === "keys") track.instrument.releaseAll(time);
-    else track.instrument.triggerRelease(time);
-    track.voices = [];
+  release(channel, time) {
+    channel.synth.releaseAll(time);
+    channel.sounding = false;
+    channel.end = Infinity;
+  }
+  applySound(channel, settings, time) {
+    if (channel.preset !== settings.timbre) {
+      channel.synth.set(PRESETS[settings.timbre]);
+      channel.preset = settings.timbre;
+    }
+    if (channel.cutoff !== settings.filter) {
+      channel.filter.frequency.setTargetAtTime(
+        filterFrequency(settings.filter),
+        time,
+        0.01,
+      );
+      channel.cutoff = settings.filter;
+    }
   }
   frame(session, time) {
     if (
@@ -156,63 +174,48 @@ export class AudioEngine {
       const frame = this.state.advance(step);
       if (frame.bpm !== null)
         this.transport.bpm.setValueAtTime(frame.bpm, time);
-      for (const [role, track] of Object.entries(session.tracks)) {
-        if (frame.cuts.includes(role)) this.release(track, role, time);
-        const ending = track.voices.filter((voice) => voice.end <= step);
-        for (const voice of ending) {
-          if (role.split(":")[0] === "keys")
-            track.instrument.triggerRelease(
-              voice.notes.map((note) =>
-                Tone.Frequency(note, "midi").toFrequency(),
-              ),
-              time,
-            );
-          else track.instrument.triggerRelease(time);
+      for (const [id, channel] of Object.entries(session.channels)) {
+        if (frame.cuts.includes(id) || channel.end <= step)
+          this.release(channel, time);
+        if (id !== "live") {
+          const slot = this.state.slots[Number(id.slice(4))];
+          const value = slot?.active ? slot.volume / 100 : 0;
+          if (channel.level !== value) {
+            channel.gain.gain.setTargetAtTime(value, time, 0.005);
+            channel.level = value;
+          }
         }
-        track.voices = track.voices.filter((voice) => voice.end > step);
       }
       for (const event of frame.attacks) {
-        const channel = event.source === "loop" ? `${event.role}:loop` : event.role;
-        const track = session.tracks[channel];
-        const notes = event.notes.map((note) =>
-          Tone.Frequency(note, "midi").toFrequency(),
+        const channel = session.channels[event.source];
+        if (channel.sounding) this.release(channel, time);
+        this.applySound(channel, event.settings, time);
+        channel.synth.triggerAttack(
+          event.notes.map((n) => Tone.Frequency(n, "midi").toFrequency()),
+          time,
+          0.65,
         );
-        if (event.role === "keys")
-          track.instrument.triggerAttack(notes, time, event.velocity);
-        else track.instrument.triggerAttack(notes[0], time, event.velocity);
-        track.voices.push({
-          end: step + event.duration / STEP_TICKS,
-          notes: event.notes,
-        });
+        channel.sounding = true;
+        channel.end = Number.isFinite(event.duration)
+          ? step + event.duration
+          : Infinity;
       }
       this.history.push({
         step,
         time,
-        ticks: this.transport.getTicksAtTime(time),
         bpm: this.state.bpm,
         attacks: frame.attacks.length,
       });
       if (this.history.length > 128) this.history.shift();
-      const snapshot = this.state.snapshot();
       Tone.getDraw().schedule(() => {
         if (
-          session !== this.session ||
-          session.generation !== this.state.generation
+          session === this.session &&
+          session.generation === this.state.generation
         )
-          return;
-        // Delayed audio confirmations must not undo a later UI selection or edit.
-        snapshot.selected = this.state.selected;
-        snapshot.volume = this.state.volume;
-        snapshot.motion = this.state.motion;
-        snapshot.tracks = snapshot.tracks.map((track) => ({
-          ...track,
-          filter: this.state.tracks[track.id].filter,
-          desired: this.state.tracks[track.id].desired,
-        }));
-        this.publish(snapshot);
+          this.publish({ ...this.state.snapshot(), step });
       }, time);
     } catch (error) {
-      this.stop(`Playback interrupted: ${error.message}`);
+      this.stop(`Воспроизведение прервано: ${error.message}`);
     }
   }
   stop(error = "") {
@@ -228,29 +231,33 @@ export class AudioEngine {
     this.transport.cancel(0);
     Tone.getDraw().cancel(0);
     if (session) {
-      // Never reopen this gate: it may still own attacks inside Tone's lookahead.
       session.gate.gain.cancelAndHoldAtTime(now);
       session.gate.gain.linearRampToValueAtTime(0, now + 0.012);
       this.retired.add(session);
-      // Resource cleanup only, not a musical clock. Transport schedules notes.
-      this.context.setTimeout(() => this.disposeSession(session), 0.16);
+      this.context.setTimeout(() => this.disposeSession(session), 0.18);
     }
     this.publish();
   }
-  select(id) {
-    this.state.select(id);
+  reset() {
+    this.stop();
+    this.state.reset();
     this.publish();
   }
-  toggle(id) {
-    this.state.toggle(id);
+  press(id, position) {
+    this.state.press(id, position);
+    this.publish();
+    if (["stopped", "error"].includes(this.state.status)) void this.play();
+  }
+  releaseKey(id) {
+    this.state.release(id);
     this.publish();
   }
-  toggleLoop(id) {
-    this.state.toggleLoop(id);
+  releaseKeys() {
+    this.state.releaseAll();
     this.publish();
   }
-  setMotion(value) {
-    this.state.setMotion(value);
+  edit(method, value) {
+    this.state[method](value);
     this.publish();
   }
   record() {
@@ -258,8 +265,7 @@ export class AudioEngine {
     this.publish();
   }
   setBpm(value) {
-    this.state.setBpm(value);
-    this.publish();
+    this.edit("setBpm", value);
   }
   setVolume(value) {
     this.state.volume = clamp(value, 0, 100);
@@ -267,36 +273,46 @@ export class AudioEngine {
     this.publish();
   }
   setFilter(value) {
-    const track = this.state.tracks[this.state.selected];
-    track.filter = clamp(value, 0, 100);
-    this.session?.tracks[track.id].filter.frequency.rampTo(
-      filterFrequency(track.filter),
-      0.03,
-    );
-    this.session?.tracks[`${track.id}:loop`].filter.frequency.rampTo(
-      filterFrequency(track.filter),
-      0.03,
-    );
+    this.state.filter = clamp(value, 0, 100);
+    const channel = this.session?.channels.live;
+    if (channel) {
+      channel.filter.frequency.rampTo(filterFrequency(this.state.filter), 0.02);
+      channel.cutoff = this.state.filter;
+    }
+    this.publish();
+  }
+  toggleSlot(index) {
+    this.state.toggleSlot(index);
+    this.publish();
+  }
+  setSlotVolume(index, value) {
+    this.state.setSlotVolume(index, value);
+    const channel = this.session?.channels[`loop${index}`];
+    const slot = this.state.slots[index];
+    if (channel && slot?.active) {
+      channel.gain.gain.rampTo(slot.volume / 100, 0.02);
+      channel.level = slot.volume / 100;
+    }
+    this.publish();
+  }
+  deleteSlot(index) {
+    this.state.deleteSlot(index);
+    const channel = this.session?.channels[`loop${index}`];
+    if (channel) {
+      channel.gain.gain.rampTo(0, 0.012);
+      channel.level = 0;
+    }
     this.publish();
   }
   diagnostics() {
     return {
-      contextState: this.context.state,
-      transportState: this.transport.state,
       sessions: Number(Boolean(this.session)) + this.retired.size,
       createdSessions: this.createdSessions,
       disposedSessions: this.disposedSessions,
-      listeners: this.listeners.size,
       scheduleCount: this.scheduleId === null ? 0 : 1,
-      voices: this.session
-        ? Object.values(this.session.tracks).reduce(
-            (sum, track) => sum + track.voices.length,
-            0,
-          )
-        : 0,
-      keysActiveVoices: this.session?.tracks.keys.instrument.activeVoices ?? 0,
-      instruments: this.session ? Object.keys(this.session.tracks).length : 0,
-      history: this.history.map((frame) => ({ ...frame })),
+      listeners: this.listeners.size,
+      instruments: this.session ? Object.keys(this.session.channels).length : 0,
+      history: [...this.history],
       snapshot: this.state.snapshot(),
     };
   }
@@ -305,7 +321,6 @@ export class AudioEngine {
     for (const session of this.retired) this.disposeSession(session);
     this.context.off("statechange", this.onContextState);
     this.master?.dispose();
-    this.master = null;
     this.listeners.clear();
   }
 }

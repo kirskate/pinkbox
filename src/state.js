@@ -1,64 +1,105 @@
 import {
-  ROLES,
   BAR_STEPS,
   PHRASE_STEPS,
   STEP_TICKS,
-  generatePhrase,
-  validPhrase,
+  chordNotes,
+  arpIndex,
+  validClip,
 } from "./patterns.js";
-const copyEvents = (events) =>
-  events.map((event) => ({ ...event, notes: [...event.notes] }));
-export function nextBar(step) {
-  return (Math.floor(step / BAR_STEPS) + 1) * BAR_STEPS;
-}
 export function clamp(value, min, max) {
   const number = Number(value);
   return Number.isFinite(number)
     ? Math.max(min, Math.min(max, Math.round(number)))
     : min;
 }
-
-// Plain musical data only. No DOM, Web Audio objects or independent clock.
+export function nextBar(step) {
+  return (Math.floor(step / BAR_STEPS) + 1) * BAR_STEPS;
+}
 export class PerformanceState {
-  constructor(seed = 1) {
-    this.seed = seed;
+  constructor() {
     this.generation = 0;
-    this.recordSerial = 0;
     this.status = "stopped";
     this.error = "";
-    this.selected = "keys";
     this.step = -1;
     this.bpm = 120;
     this.pendingBpm = null;
-    this.volume = 80;
+    this.volume = 75;
+    this.tonic = 0;
+    this.scale = "minor";
+    this.richness = 0;
+    this.arp = 0;
+    this.direction = "up";
+    this.timbre = 0;
+    this.filter = 100;
+    this.mode = "keys";
+    this.bassMode = "link";
+    this.held = new Map();
+    this.live = { notes: [], signature: "", end: Infinity };
+    this.arpOrigin = 0;
+    this.arpCount = 0;
+    this.slots = Array(5).fill(null);
+    this.serial = 0;
     this.rec = null;
-    this.motion = 0;
-    this.motionChanged = false;
-    this.tracks = Object.fromEntries(
-      ROLES.map(({ id }) => [
-        id,
-        {
-          id,
-          desired: id === "keys",
-          active: false,
-          pending: null,
-          filter: 100,
-          loopDesired: false,
-          loopActive: false,
-          loopPending: null,
-          loopOrigin: 0,
-          clip: null,
-          phrase: null,
-          origin: 0,
-        },
-      ]),
+    this.deleted = [];
+  }
+  position() {
+    const positions = [...this.held.values()];
+    return (
+      (this.mode === "bass"
+        ? positions.filter((p) => (this.bassMode === "manual" ? p.pad : !p.pad))
+        : positions.filter((p) => !p.pad)
+      ).at(-1) ?? null
     );
   }
-  select(id) {
-    if (this.tracks[id]) this.selected = id;
+  notes() {
+    const p = this.position();
+    if (!p) return [];
+    const notes = chordNotes(this.tonic, this.scale, p, this.richness);
+    return this.mode === "bass" ? [notes[0] - 24] : notes;
+  }
+  settings() {
+    return {
+      timbre: this.mode === "bass" ? "bass" : this.timbre,
+      filter: this.filter,
+    };
+  }
+  press(id, position) {
+    if (this.held.has(id)) return;
+    this.held.set(id, {
+      degree: clamp(position.degree, 0, 7),
+      black: Boolean(position.black),
+      pad: Boolean(position.pad),
+    });
+  }
+  release(id) {
+    this.held.delete(id);
+  }
+  releaseAll() {
+    this.held.clear();
+  }
+  setKey(value) {
+    this.tonic = clamp(value, 0, 11);
+  }
+  setScale(value) {
+    if (["minor", "major"].includes(value)) this.scale = value;
+  }
+  setRichness(value) {
+    this.richness = clamp(value, 0, 2);
+  }
+  setArp(value) {
+    this.arp = clamp(value, 0, 3);
+  }
+  setDirection(value) {
+    if (["up", "down", "updown"].includes(value)) this.direction = value;
+  }
+  setTimbre(value) {
+    this.timbre = clamp(value, 0, 2);
+  }
+  setMode(value) {
+    if (["keys", "bass"].includes(value)) this.mode = value;
   }
   beginStart() {
-    if (this.status !== "stopped" && this.status !== "error") return null;
+    if (!["stopped", "error"].includes(this.status)) return null;
     this.status = "starting";
     this.error = "";
     return ++this.generation;
@@ -68,208 +109,201 @@ export class PerformanceState {
       return false;
     this.status = "running";
     this.step = -1;
-    for (const track of Object.values(this.tracks)) {
-      track.active = track.desired;
-      track.pending = null;
-      track.origin = 0;
-      track.phrase = null;
-      track.loopActive = track.loopDesired && Boolean(track.clip);
-      track.loopPending = null;
-      track.loopOrigin = 0;
-    }
+    this.live = { notes: [], signature: "", end: Infinity };
+    for (const slot of this.slots)
+      if (slot) {
+        slot.origin = 0;
+        slot.active = slot.enabled;
+        slot.pending = null;
+      }
     return true;
   }
   stop(error = "") {
     ++this.generation;
-    this.cancelRecording();
     this.status = error ? "error" : "stopped";
     this.error = error;
+    this.rec = null;
+    this.releaseAll();
+    this.live = { notes: [], signature: "", end: Infinity };
     this.step = -1;
     if (this.pendingBpm) this.bpm = this.pendingBpm.value;
     this.pendingBpm = null;
-    for (const track of Object.values(this.tracks)) {
-      track.loopActive = false;
-      track.loopPending = null;
-      track.active = false;
-      track.pending = null;
-      track.phrase = null;
-    }
+    for (const slot of this.slots)
+      if (slot) {
+        slot.active = false;
+        slot.pending = null;
+      }
   }
-  toggle(id) {
-    const track = this.tracks[id];
-    if (!track) return;
-    track.desired = !track.desired;
-
-    track.pending =
-      this.status === "running" && track.desired !== track.active
-        ? (this.rec?.target === id ? this.rec.end : nextBar(this.step))
-        : null;
-  }
-  toggleLoop(id) {
-    const track = this.tracks[id];
-    if (!track?.clip) return;
-    track.loopDesired = !track.loopDesired;
-    track.loopPending =
-      this.status === "running" && track.loopDesired !== track.loopActive
-        ? nextBar(this.step)
-        : null;
-  }
-  setMotion(value) {
-    const motion = clamp(value, 0, 100);
-    if (motion !== this.motion) this.motionChanged = true;
-    this.motion = motion;
+  reset() {
+    this.stop();
+    this.slots.fill(null);
+    this.deleted = [];
   }
   setBpm(value) {
-    value = clamp(value, 60, 160);
+    const bpm = clamp(value, 60, 160);
     if (this.status === "running")
       this.pendingBpm =
-        value === this.bpm ? null : { value, step: nextBar(this.step) };
-    else this.bpm = value;
+        bpm === this.bpm ? null : { value: bpm, step: nextBar(this.step) };
+    else this.bpm = bpm;
   }
   record() {
-    const track = this.tracks[this.selected];
-    if (this.status !== "running" || this.rec) return false;
+    const index = this.slots.findIndex((slot) => slot === null);
+    if (this.status !== "running" || this.rec || index < 0) return false;
     const start = nextBar(this.step);
-    if (!track.desired || !track.active) {
-      track.desired = true;
-      track.pending = start;
-    }
+    this.error = "";
     this.rec = {
-      token: ++this.recordSerial,
-      target: this.selected,
+      index,
       phase: "armed",
       start,
       end: start + PHRASE_STEPS,
       events: [],
-      generation: this.generation,
+      open: null,
+      settings: null,
     };
     return true;
   }
-  cancelRecording() {
-    this.rec = null;
+  closeCapture(step) {
+    if (!this.rec?.open) return;
+    const event = this.rec.open;
+    event.duration =
+      Math.min(step, this.rec.end) * STEP_TICKS -
+      this.rec.start * STEP_TICKS -
+      event.tick;
+    if (event.duration > 0) this.rec.events.push(event);
+    this.rec.open = null;
   }
-  commitRecording(token, generation) {
+  captureAttack(step, notes) {
     if (
-      !this.rec ||
-      this.rec.token !== token ||
-      generation !== this.generation ||
-      this.rec.phase !== "finalizing"
+      this.rec?.phase !== "recording" ||
+      step >= this.rec.end ||
+      !notes.length
     )
-      return false;
-    const { target, events } = this.rec;
-    if (!validPhrase(target, events)) {
-      this.cancelRecording();
-      this.error = "Recording could not be saved. Previous phrase kept.";
-      return false;
-    }
-    const track = this.tracks[target];
-    track.clip = copyEvents(events);
-    track.loopOrigin = this.rec.start;
-    track.loopDesired = track.loopActive = true;
-    track.loopPending = null;
-    track.desired = track.active = false;
-    track.pending = null;
-    this.rec = null;
-    return true;
+      return;
+    this.closeCapture(step);
+    this.rec.open = {
+      tick: (step - this.rec.start) * STEP_TICKS,
+      duration: 0,
+      notes: [...notes],
+    };
+  }
+  toggleSlot(index) {
+    const slot = this.slots[index];
+    if (!slot) return;
+    slot.enabled = !slot.enabled;
+    slot.pending =
+      this.status === "running" && slot.enabled !== slot.active
+        ? nextBar(this.step)
+        : null;
+  }
+  setSlotVolume(index, value) {
+    if (this.slots[index]) this.slots[index].volume = clamp(value, 0, 100);
+  }
+  deleteSlot(index) {
+    if (!this.slots[index]) return;
+    this.slots[index] = null;
+    this.deleted.push(`loop${index}`);
   }
   advance(step) {
-    if (this.status !== "running") return { attacks: [], cuts: [] };
-    this.step = step;
     const frame = { attacks: [], cuts: [], bpm: null };
-    if (this.motionChanged) {
-      if (this.rec?.target === "keys" && this.rec.phase === "recording") {
-        const tick = (step - this.rec.start) * STEP_TICKS;
-        // Capture the real early note-off when the dial releases a held chord.
-        for (const event of this.rec.events)
-          event.duration = Math.min(event.duration, tick - event.tick);
-      }
-      frame.cuts.push("keys");
-      this.motionChanged = false;
-    }
+    if (this.status !== "running") return frame;
+    this.step = step;
+    frame.cuts.push(...this.deleted.splice(0));
     if (this.pendingBpm && step >= this.pendingBpm.step) {
       this.bpm = this.pendingBpm.value;
       this.pendingBpm = null;
       frame.bpm = this.bpm;
     }
-    for (const track of Object.values(this.tracks)) {
-      if (track.pending !== null && step >= track.pending) {
-        track.active = track.desired;
-        track.pending = null;
-        frame.cuts.push(track.id);
-        track.origin = step;
-        track.phrase = null;
-      }
-    }
-    for (const track of Object.values(this.tracks)) {
-      if (track.loopPending !== null && step >= track.loopPending) {
-        track.loopActive = track.loopDesired;
-        track.loopPending = null;
-        track.loopOrigin = step;
-        frame.cuts.push(`${track.id}:loop`);
-      }
-    }
     if (this.rec?.phase === "armed" && step >= this.rec.start) {
       this.rec.phase = "recording";
-      const track = this.tracks[this.rec.target];
-      // REC owns its full capture interval, even if LIVE was queued off.
-      if (!track.active) {
-        track.active = true;
-        track.origin = step;
-        track.phrase = null;
-        frame.cuts.push(track.id);
-      }
+      this.rec.settings = this.settings();
+      this.captureAttack(step, this.live.notes);
     }
     if (this.rec?.phase === "recording" && step >= this.rec.end) {
-      this.rec.phase = "finalizing";
-      const token = this.rec.token;
-      const generation = this.generation;
-      const target = this.rec.target;
-      if (this.commitRecording(token, generation)) {
-        frame.cuts.push(target, `${target}:loop`);
+      this.closeCapture(this.rec.end);
+      const rec = this.rec;
+      if (validClip(rec.events)) {
+        this.slots[rec.index] = {
+          id: ++this.serial,
+          events: rec.events,
+          settings: rec.settings,
+          volume: 75,
+          enabled: true,
+          active: true,
+          pending: null,
+          origin: rec.end,
+        };
+      } else
+        this.error =
+          "Запись пустая: удерживай клавишу или играй пэдами во время REC.";
+      this.rec = null;
+    }
+    const notes = this.notes();
+    const position = this.position();
+    const signature = notes.length
+      ? JSON.stringify([
+          position,
+          notes,
+          this.arp,
+          this.direction,
+          this.settings().timbre,
+        ])
+      : "";
+    const changed = signature !== this.live.signature;
+    const arp = this.mode === "keys" && this.arp > 0;
+    if (changed || this.live.end <= step) {
+      if (this.live.notes.length) {
+        frame.cuts.push("live");
+        this.closeCapture(step);
+      }
+      this.live.notes = [];
+      if (changed) {
+        this.arpOrigin = step;
+        this.arpCount = 0;
       }
     }
-    for (const track of Object.values(this.tracks)) {
-      if (!track.loopActive || !track.clip) continue;
-      const position = ((step - track.loopOrigin) % PHRASE_STEPS + PHRASE_STEPS) % PHRASE_STEPS;
-      for (const event of track.clip) {
-        if (event.tick === position * STEP_TICKS)
-          frame.attacks.push({ role: track.id, source: "loop", ...event });
+    this.live.signature = signature;
+    const spacing = [0, 4, 2, 1][this.arp];
+    const due =
+      notes.length && (arp ? (step - this.arpOrigin) % spacing === 0 : changed);
+    if (due) {
+      if (this.live.notes.length) {
+        frame.cuts.push("live");
+        this.closeCapture(step);
       }
+      const played = arp
+        ? [notes[arpIndex(this.arpCount++, notes.length, this.direction)]]
+        : notes;
+      this.live.notes = [...played];
+      this.live.end = arp ? step + spacing : Infinity;
+      frame.attacks.push({
+        source: "live",
+        notes: played,
+        duration: Infinity,
+        settings: this.settings(),
+      });
+      this.captureAttack(step, played);
     }
-    for (const track of Object.values(this.tracks)) {
-      if (!track.active) continue;
-      const position =
-        (((step - track.origin) % PHRASE_STEPS) + PHRASE_STEPS) % PHRASE_STEPS;
-      if (!track.phrase || position === 0)
-        track.phrase = generatePhrase(track.id, this.seed++);
-      let played = track.phrase;
-      if (track.id === "keys" && this.motion > 0) {
-        const bar = Math.floor(position / BAR_STEPS);
-        const chord = track.phrase.find(e => e.tick === bar * BAR_STEPS * STEP_TICKS);
-        const spacing = this.motion < 34 ? 4 : this.motion < 67 ? 2 : 1;
-        played = position % spacing === 0 ? [{
-          tick: position * STEP_TICKS,
-          duration: spacing * STEP_TICKS,
-          notes: [chord.notes[Math.floor(position / spacing) % chord.notes.length]],
-          velocity: 0.48,
-        }] : [];
+    for (let i = 0; i < this.slots.length; i++) {
+      const slot = this.slots[i];
+      if (!slot) continue;
+      if (slot.pending !== null && step >= slot.pending) {
+        slot.active = slot.enabled;
+        slot.pending = null;
+        frame.cuts.push(`loop${i}`);
       }
-      for (const event of played) {
-        if (event.tick !== position * STEP_TICKS) continue;
-        frame.attacks.push({ role: track.id, source: "live", ...event });
-        if (this.rec?.target === track.id && this.rec.phase === "recording") {
-          const tick = (step - this.rec.start) * STEP_TICKS;
-          this.rec.events.push({
-            ...event,
-            notes: [...event.notes],
-            tick,
-            duration: Math.min(
-              event.duration,
-              (this.rec.end - step) * STEP_TICKS,
-            ),
+      if (!slot.active) continue;
+      const tick =
+        ((((step - slot.origin) % PHRASE_STEPS) + PHRASE_STEPS) %
+          PHRASE_STEPS) *
+        STEP_TICKS;
+      for (const event of slot.events)
+        if (event.tick === tick)
+          frame.attacks.push({
+            source: `loop${i}`,
+            notes: event.notes,
+            duration: event.duration / STEP_TICKS,
+            settings: slot.settings,
           });
-        }
-      }
     }
     return frame;
   }
@@ -278,33 +312,42 @@ export class PerformanceState {
       status: this.status,
       error: this.error,
       generation: this.generation,
-      selected: this.selected,
       step: this.step,
       bpm: this.bpm,
-      pendingBpm: this.pendingBpm ? { ...this.pendingBpm } : null,
+      pendingBpm: this.pendingBpm,
       volume: this.volume,
-      motion: this.motion,
+      tonic: this.tonic,
+      scale: this.scale,
+      richness: this.richness,
+      arp: this.arp,
+      direction: this.direction,
+      timbre: this.timbre,
+      filter: this.filter,
+      mode: this.mode,
+      bassMode: this.bassMode,
+      held: [...this.held.values()],
+      notes: this.notes(),
       rec: this.rec
         ? {
-            target: this.rec.target,
+            index: this.rec.index,
             phase: this.rec.phase,
             start: this.rec.start,
             end: this.rec.end,
           }
         : null,
-      tracks: Object.values(this.tracks).map(
-        ({ id, desired, active, pending, filter, clip, loopDesired, loopActive, loopPending }) => ({
-          id,
-          desired,
-          active,
-          pending,
-          filter,
-          loopDesired,
-          loopActive,
-          loopPending,
-          saved: Boolean(clip),
-          eventCount: clip?.length ?? 0,
-        }),
+      slots: this.slots.map((slot) =>
+        slot
+          ? {
+              id: slot.id,
+              volume: slot.volume,
+              enabled: slot.enabled,
+              active: slot.active,
+              pending: slot.pending,
+              settings: slot.settings,
+              eventCount: slot.events.length,
+              origin: slot.origin,
+            }
+          : null,
       ),
     };
   }

@@ -1,123 +1,82 @@
-// One harmonic world. All roles share C minor; no pitch changes with tempo.
-export const ROLES = [
-  { id: "keys", name: "KEYS", character: "Soft chords", color: "#c3ee67" },
-  {
-    id: "synth",
-    name: "SYNTH",
-    character: "Spacious melody",
-    color: "#fdbe73",
-  },
-  { id: "bass", name: "BASS", character: "Low pulse", color: "#78dfdd" },
-  { id: "arp", name: "ARP", character: "Moving notes", color: "#c7b0ff" },
-];
+// The laptop letters trigger positions, never absolute pitches.
 export const PPQ = 192;
-export const STEP_TICKS = PPQ / 4;
+export const STEP_TICKS = 48;
 export const BAR_STEPS = 16;
 export const PHRASE_STEPS = 64;
-export const DEFAULT_BPM = 120;
-export const WORLD_NOTES = new Set([0, 2, 3, 5, 7, 8, 10]);
-export const RANGES = {
-  keys: [48, 70],
-  synth: [72, 82],
-  bass: [31, 43],
-  arp: [60, 82],
+export const NOTE_NAMES = [
+  "C",
+  "C♯",
+  "D",
+  "E♭",
+  "E",
+  "F",
+  "F♯",
+  "G",
+  "A♭",
+  "A",
+  "B♭",
+  "B",
+];
+export const SCALES = {
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  major: [0, 2, 4, 5, 7, 9, 11],
 };
-
-export function randomSource(seed) {
-  let value = seed >>> 0;
-  return () => {
-    value += 0x6d2b79f5;
-    let t = Math.imul(value ^ (value >>> 15), 1 | value);
-    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+export const TIMBRE_NAMES = ["SOFT", "GLASS", "ANALOG"];
+export const KEY_BINDINGS = {
+  KeyA: { degree: 0, black: false },
+  KeyW: { degree: 0, black: true },
+  KeyS: { degree: 1, black: false },
+  KeyE: { degree: 1, black: true },
+  KeyD: { degree: 2, black: false },
+  KeyF: { degree: 3, black: false },
+  KeyT: { degree: 3, black: true },
+  KeyG: { degree: 4, black: false },
+  KeyY: { degree: 4, black: true },
+  KeyH: { degree: 5, black: false },
+  KeyU: { degree: 5, black: true },
+  KeyJ: { degree: 6, black: false },
+  KeyK: { degree: 7, black: false },
+};
+export function scaleNote(tonic, scale, degree) {
+  return 60 + tonic + SCALES[scale][degree % 7] + 12 * Math.floor(degree / 7);
 }
-export function generatePhrase(role, seed) {
-  if (!RANGES[role]) throw new Error("Unknown musical role");
-  const random = randomSource(seed);
-  const choose = (values) => values[Math.floor(random() * values.length)];
-  const events = [];
-  const add = (step, duration, notes, velocity) =>
-    events.push({
-      tick: step * STEP_TICKS,
-      duration: Math.min(duration, PHRASE_STEPS - step) * STEP_TICKS,
-      notes: Array.isArray(notes) ? notes : [notes],
-      velocity,
-    });
-  for (let bar = 0; bar < 4; bar++) {
-    const base = bar * BAR_STEPS;
-    if (role === "keys") {
-      add(
-        base,
-        choose([10, 12, 14]),
-        choose([
-          [48, 55, 63, 70],
-          [51, 58, 60, 67],
-          [55, 58, 63, 67],
-        ]),
-        0.55,
-      );
-    } else if (role === "bass") {
-      add(base, 3, 36, 0.72);
-      add(base + 6, 2, choose([36, 43]), 0.55);
-      add(base + 8, 3, choose([36, 39]), 0.66);
-      if (random() > 0.4) add(base + 14, 1, 31, 0.45);
-    } else if (role === "synth") {
-      add(base, choose([3, 5]), choose([72, 75, 79]), 0.38);
-      if (random() > 0.3) add(base + 8, 3, choose([75, 79, 82]), 0.32);
-      if (random() > 0.55) add(base + 13, 2, choose([77, 79]), 0.28);
-    } else {
-      const notes = choose([
-        [60, 67, 75, 70],
-        [63, 70, 79, 75],
-        [67, 72, 82, 75],
-      ]);
-      for (let step = 0; step < 16; step += 2) {
-        // Keep a reliable pulse even at 60 BPM; vary notes and accents, not gaps.
-        add(
-          base + step,
-          1,
-          notes[(step / 2 + bar) % notes.length],
-          (step % 4 === 0 ? 0.4 : 0.28) * (0.9 + random() * 0.1),
-        );
-      }
-    }
+export function chordNotes(tonic, scale, position, richness = 0) {
+  const root = scaleNote(tonic, scale, position.degree);
+  if (position.black) return [root + 1, root + 5, root + 8];
+  return Array.from({ length: 3 + richness }, (_, i) =>
+    scaleNote(tonic, scale, position.degree + i * 2),
+  );
+}
+export function arpIndex(index, length, direction) {
+  if (direction === "down") return length - 1 - (index % length);
+  if (direction === "updown") {
+    const phase = index % (length * 2 - 2);
+    return phase < length ? phase : length * 2 - 2 - phase;
   }
-  return events;
+  return index % length;
 }
-export function validPhrase(role, events) {
-  const range = RANGES[role];
-  return Boolean(
-    range &&
+export function validClip(events) {
+  return (
     Array.isArray(events) &&
-    events.length &&
+    events.length > 0 &&
     events.length <= 64 &&
     events.every(
-      (event) =>
-        Number.isInteger(event.tick) &&
-        event.tick >= 0 &&
-        event.tick < PHRASE_STEPS * STEP_TICKS &&
-        event.tick % STEP_TICKS === 0 &&
-        Number.isInteger(event.duration) &&
-        event.duration > 0 &&
-        event.duration % STEP_TICKS === 0 &&
-        event.tick + event.duration <= PHRASE_STEPS * STEP_TICKS &&
-        Number.isFinite(event.velocity) &&
-        event.velocity > 0 &&
-        event.velocity <= 1 &&
-        Array.isArray(event.notes) &&
-        event.notes.length > 0 &&
-        event.notes.length <= 4 &&
-        event.notes.every(
-          (note) =>
-            Number.isInteger(note) &&
-            note >= range[0] &&
-            note <= range[1] &&
-            WORLD_NOTES.has(note % 12),
-        ),
-    ),
+      (e) =>
+        Number.isInteger(e.tick) &&
+        e.tick >= 0 &&
+        e.tick < PHRASE_STEPS * STEP_TICKS &&
+        e.tick % STEP_TICKS === 0 &&
+        Number.isInteger(e.duration) &&
+        e.duration > 0 &&
+        e.duration % STEP_TICKS === 0 &&
+        e.tick + e.duration <= PHRASE_STEPS * STEP_TICKS &&
+        Array.isArray(e.notes) &&
+        e.notes.length > 0 &&
+        e.notes.length <= 5 &&
+        e.notes.every((n) => Number.isInteger(n) && n >= 24 && n <= 108),
+    )
   );
 }
 export function filterFrequency(value) {
-  return 180 * (18000 / 180) ** (Math.max(0, Math.min(100, value)) / 100);
+  return 180 * 100 ** (Math.max(0, Math.min(100, value)) / 100);
 }

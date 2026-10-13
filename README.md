@@ -1,51 +1,52 @@
 # Pinkbox
 
-A browser groovebox for performing without playing individual notes. KEYS, SYNTH, BASS and ARP generate compatible phrases in one C minor world. Real Tone.js synthesizers provide the sound; the old WAV files are not used by this version.
+A pink keyboard instrument and five-track looper inspired by the reference hardware layout. One live voice becomes a diatonic chord, an arpeggio, or a bass note. SYNTH changes its sound; each saved loop keeps its own notes and sound.
 
-## Run
+## Run locally
 
-Requires Bun 1.4 or later.
+Requires Bun 1.4+.
 
 ```sh
 bun install --frozen-lockfile
 bun run dev
 ```
 
-Open the address printed by the server. Audio starts only after PLAY. No external fonts or audio downloads are required.
+Open the address printed by the server. If port 3000 is already occupied:
 
-## Perform
+```sh
+PORT=3001 bun run dev
+```
 
-1. PLAY starts live KEYS. Select a role by its large name. LIVE enables/disables its generated performance on the next bar; LOOP independently enables/disables its saved phrase.
-2. Turn **LIVE KEYS · АККОРД → НОТЫ** to move from a full chord to separate notes: quarters, eighths, sixteenths. Drag the dial vertically, use the range, or use the arrow keys on the range. The instrument plays the rhythm for you.
-3. REC captures the selected role from the next bar for **four bars** (8 seconds at 120 BPM, after the wait). REC enables LIVE if needed. Switching LIVE off during capture lets the four-bar recording finish. STOP cancels it immediately.
-4. On successful capture, LOOP starts automatically and LIVE switches off. Turn LIVE back on to play over the saved loop. Turning LIVE off again leaves the loop playing. Motion changes affect live KEYS, not saved notes.
-5. Select BASS, ARP or SYNTH to add or record another role. FILTER changes both live and loop timbre of the selected role; VOL affects the whole mix. BPM changes on a bar boundary, keeping pitch and musical length.
-6. REC again records a new live candidate while the old loop remains independent (mute LOOP if desired). Successful completion replaces that role's slot; STOP/error preserves it. One saved phrase per role.
-7. Mute LIVE/LOOP layers to end the performance, then STOP. PLAY restarts selected sources from the beginning. Saved phrases last until page reload; REC stores notes and rhythm, not a downloadable audio file.
+To get the latest GitHub version, stop the old server with Ctrl+C, run `git pull --ff-only origin main`, install again, then restart. The browser needs a refresh.
 
-The instrument stops safely when its tab is hidden or audio is interrupted. Press PLAY to resume from the beginning. Background performance is not supported.
+## Play and record
 
-## Verify
+1. Hold **A** or an on-screen white key. Audio starts from this gesture. A/S/D/F/G/H/J/K select scale degrees I–VII/I↑; letters are positions, not fixed pitches. W/E/T/Y/U select the extra major chords. Physical key positions also work with a Russian keyboard layout.
+2. Change KEY/SCALE while holding: the live chord follows the new tonality. Existing loops keep their notes. CHORD selects TRIAD/7TH/9TH. White keys use the scale; black keys are always major triads rooted a semitone above the preceding white degree.
+3. Turn **ARP** from CHORD to 1/4, 1/8 or 1/16; it replaces the held chord with its notes. Select UP/DOWN/UP-DOWN. Turn **TONE** for SOFT/GLASS/ANALOG, FILTER for live brightness. All sounds are real Tone.js synthesis, not missing sample-bank placeholders.
+4. Press **REC**. It waits for the next available bar, then captures four bars: 8 seconds at 120 BPM, excluding the wait. It also captures a note held before the recording started. After four bars a new loop begins automatically. Your held key continues playing over it; release the key to hear the saved loop alone.
+5. Play and REC another phrase over the loop. Each recording gets a new slot, with its sound/FILTER frozen at recording start. Five slots total; the live voice is separate. Each loop has its own play/mute, volume and delete. When all five are filled, delete one to enable REC again.
+6. **BASS** changes the sole live voice to a held low root. LINK follows the keyboard; MANUAL uses the I/V pads. Pressing a pad enters manual bass. **KEYS** returns to chord/ARP playing. Bass and chords never form simultaneous independent live layers.
+7. **STOP** stops sound and unfinished REC, keeping completed loops. **PLAY** restarts them from the beginning. **RESET ALL** stops and deletes all recordings. MASTER VOL adjusts everything.
+
+Live key actions are quantized to a 1/16 grid in this version. Last held key wins; releasing it returns to an earlier held key. Recorded rhythm/notes follow what was played on this grid. Loops live only in this tab's memory: reload or close clears them. Changing tonality can intentionally clash with old loops. Backgrounding the page stops the performance safely; press PLAY to restart.
+
+## Verify and build
 
 ```sh
 bun test
 bun run check
 bun run build
-# With the dev server running and Chromium installed:
-bun run test:recording
+# With dev server running and Chromium installed:
 bun run test:browser
 bun run test:accessibility
-bun run test:audio
-bun run test:performance
 bun run test:stress
 ```
 
-Browser tests use `/usr/bin/chromium` by default; set `CHROMIUM_PATH` for another installed Chromium binary, and `PINKBOX_URL` for another server address. Stress runs for 300 seconds; `STRESS_SECONDS` overrides it for troubleshooting. Reports and screenshots are written to `/tmp/pinkbox-validation`. The performance test also captures a WAV for listening; PCM export is a test artifact, not a product feature. Run these tests in a trusted local environment: their Chromium launcher uses `--no-sandbox` for the cloud container.
+`test:recording` is an alias for the full browser scenario. It records five real loops, checks actual audio, key hold/release, changed tonality, arp, bass/pads, saved timbres, track volume/mute/delete, STOP/reset, cleanup and viewport. Stress also records five actual loops before its default 60-second load; set `STRESS_SECONDS` for longer runs. Set `CHROMIUM_PATH` and `PINKBOX_URL` if needed. Reports/screenshots are in `/tmp/pinkbox-validation`.
 
-`bun run build` produces a static page and browser bundle in `dist/`. The dev server retains the existing Tone browser bundle workaround. JavaScript has syntax, logic, browser and audio checks; a separate linter or TypeScript checker is not configured.
+`check` is a JavaScript syntax check; TypeScript and a linter are not configured. `build` produces static `dist/`, preserving the existing Tone browser bundle workaround. No external fonts or audio downloads are required. The `public/assets/audio` files belong to the original version and are not used.
 
-## Scope and status
+See [SPEC](docs/SPEC.md), [ARCHITECTURE](docs/ARCHITECTURE.md), [PLAN](docs/PLAN.md). Only desktop Chromium/Linux is automatically verified; real MacBook/Safari/mobile audio and subjective sound/design approval remain open. Sample-bank blending, external MIDI/FX, persistence and audio export are deferred.
 
-See [SPEC](docs/SPEC.md), [architecture](docs/ARCHITECTURE.md) and [plan / verification](docs/PLAN.md). Pitch, key/scale changes, other effects, drums, a visualizer, project persistence and user audio export are deferred. Only desktop Chromium is verified; real MacBook/Safari/mobile audio and the author's subjective approval remain to be checked.
-
-The original project is preserved in the published Git branch `legacy-pinkbox` at `422b9458e61d6b80286068e97bf3ccacbaf32ddb`. Development continues in `main`.
+The original project remains in `legacy-pinkbox` at `422b9458e61d6b80286068e97bf3ccacbaf32ddb`. Previous groovebox revisions remain in Git history. Current development continues in `main`.

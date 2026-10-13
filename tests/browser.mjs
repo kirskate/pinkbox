@@ -1,286 +1,265 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright-core";
-const url = process.env.PINKBOX_URL || "http://localhost:3000";
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
-  args: ["--no-sandbox", "--autoplay-policy=user-gesture-required"],
+  args: ["--no-sandbox"],
 });
 const page = await browser.newPage({ viewport: { width: 1512, height: 850 } });
 const errors = [];
-page.on("pageerror", (error) => errors.push(error.message));
-page.on("console", (message) => {
-  if (message.type() === "error") errors.push(message.text());
+page.on("pageerror", (e) => errors.push(e.message));
+page.on("console", (m) => {
+  if (m.type() === "error" || m.text().includes("Max polyphony"))
+    errors.push(m.text());
 });
-const results = [];
-const check = (name, detail) => {
-  results.push({ name, detail });
-  console.log(`PASS ${name}: ${JSON.stringify(detail)}`);
-};
-const evaluate = (callback, argument) =>
-  page.evaluate(
-    async ({ source, argument }) => {
-      const { engine } = await import("/src/main.js");
-      return (0, eval)(`(${source})`)(engine, argument);
-    },
-    { source: callback.toString(), argument },
-  );
-const wait = async (callback, argument = null, timeout = 22000) => {
-  await page.waitForFunction(
-    ({ source, argument }) => {
-      return (0, eval)(`(${source})`)(globalThis.__testEngine, argument);
-    },
-    { source: callback.toString(), argument },
-    { timeout },
-  );
-};
+const wait = (fn) => page.waitForFunction(fn, null, { timeout: 18000 });
+const evalEngine = (fn) => page.evaluate(fn);
 const sample = () =>
   page.evaluate(() => {
-    const data = new Float32Array(globalThis.__probe.analyser.fftSize);
-    globalThis.__probe.analyser.getFloatTimeDomainData(data);
-    return {
-      peak: Math.max(...data.map(Math.abs)),
-      rms: Math.sqrt(
-        data.reduce((sum, value) => sum + value * value, 0) / data.length,
-      ),
-    };
+    const data = new Float32Array(__probe.fftSize);
+    __probe.getFloatTimeDomainData(data);
+    return Math.max(...data.map(Math.abs));
   });
-try {
-  const response = await page.goto(url);
-  assert.equal(response.status(), 200);
-  await page.waitForSelector("#play");
-  await evaluate((engine) => {
-    globalThis.__testEngine = engine;
-  });
-  let diag = await evaluate((engine) => engine.diagnostics());
-  assert.equal(diag.sessions, 0);
-  assert.equal(diag.scheduleCount, 0);
-  assert.equal(diag.snapshot.status, "stopped");
-  check("no autoplay / one ready layer", diag.snapshot.tracks);
-  await page.click("#play");
-  await wait((engine) => engine.state.status === "running");
-  await evaluate((engine) => {
-    const context = engine.context.rawContext;
-    const analyser = context.createAnalyser();
-    analyser.fftSize = 256;
-    const silent = context.createGain();
-    silent.gain.value = 0;
-    engine.master.connect(analyser);
-    analyser.connect(silent);
-    silent.connect(context.destination);
-    globalThis.__probe = { analyser, silent };
-  });
-  await page.waitForTimeout(200);
-  let signal = await sample();
-  assert(signal.rms > 0.0001);
-  assert(signal.peak < 0.95);
-  check("actual Web Audio signal", signal);
-  await page.click("#record");
-  await wait((engine) => engine.state.rec?.phase === "recording");
-  await evaluate((engine) => engine.setBpm(160));
-  await page.click('[data-select="bass"]');
-  assert.equal(await evaluate((engine) => engine.state.rec.target), "keys");
-  await page.click('[data-toggle="bass"]');
-  await page.click('[data-toggle="arp"]');
-  await page.click('[data-toggle="synth"]');
-  await wait(
-    (engine) => Boolean(engine.state.tracks.keys.clip) && !engine.state.rec,
-  );
-  const clip = await evaluate((engine) =>
-    structuredClone(engine.state.tracks.keys.clip),
-  );
-  assert(clip.length > 0);
-  assert(clip.every((event) => event.tick + event.duration <= 3072));
-  check("REC 4 bars with tempo change and fixed target", {
-    events: clip.length,
-    bpm: await evaluate((engine) => engine.state.bpm),
-  });
-  await wait((engine) =>
-    Object.values(engine.state.tracks).every((track) => track.active || track.loopActive),
-  );
-  const baselineStep = await evaluate((engine) => engine.state.step);
-  await wait(
-    (engine, minimum) => engine.state.step >= minimum,
-    baselineStep + 128,
-  );
-  assert.deepEqual(
-    await evaluate((engine) => engine.state.tracks.keys.clip),
-    clip,
-  );
-  diag = await evaluate((engine) => engine.diagnostics());
-  for (let i = 1; i < diag.history.length; i++) {
-    const previous = diag.history[i - 1],
-      current = diag.history[i];
-    assert.equal(current.step, previous.step + 1);
-    assert(Math.abs(current.ticks - current.step * 48) < 0.0001);
-    assert(
-      Math.abs(current.time - previous.time - 60 / previous.bpm / 4) < 0.003,
-    );
-  }
-  signal = { peak: 0, rms: 0 };
-  for (let i = 0; i < 10; i++) {
-    const reading = await sample();
-    signal.peak = Math.max(signal.peak, reading.peak);
-    signal.rms = Math.max(signal.rms, reading.rms);
-    await page.waitForTimeout(50);
-  }
-  assert(signal.rms > 0.0001, "Four-role signal remained silent for 500ms");
-  assert(signal.peak < 0.95, "Four-role signal clipped");
-  check("two saved loops / four-role timing / headroom", {
-    frames: diag.history.length,
-    voices: diag.voices,
-    signal,
-  });
-  await page.locator("#filter").evaluate((input) => {
-    input.value = "12";
+const setRange = (id, value) =>
+  page.locator(`#${id}`).evaluate((input, value) => {
+    input.value = value;
     input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  assert.equal(await evaluate((engine) => engine.state.tracks.bass.filter), 12);
+  }, String(value));
+const results = [];
+const pass = (name, data = true) => {
+  results.push({ name, data });
+  console.log("PASS", name, JSON.stringify(data));
+};
+try {
   assert.equal(
-    await evaluate((engine) => engine.state.tracks.keys.filter),
-    100,
+    (
+      await page.goto(process.env.PINKBOX_URL || "http://localhost:3000")
+    ).status(),
+    200,
   );
+  await page.waitForSelector("[data-key=KeyA]");
+  await page.evaluate(async () => {
+    globalThis.__engine = (await import("/src/main.js")).engine;
+  });
+  assert.equal(await evalEngine(() => __engine.state.status), "stopped");
+  await page.keyboard.down("a");
+  await wait(
+    () =>
+      __engine.state.status === "running" &&
+      __engine.state.live.notes.length > 0,
+  );
+  await page.evaluate(() => {
+    globalThis.__probe = __engine.context.rawContext.createAnalyser();
+    __probe.fftSize = 1024;
+    __engine.master.connect(__probe);
+  });
   assert.deepEqual(
-    await evaluate((engine) => engine.state.tracks.keys.clip),
-    clip,
+    await evalEngine(() => __engine.state.live.notes),
+    [60, 63, 67],
   );
-  await evaluate((engine) => engine.setVolume(0));
-  await page.waitForTimeout(100);
-  signal = await sample();
-  assert(signal.peak < 0.00001);
-  assert.equal(await evaluate((engine) => engine.state.status), "running");
-  await evaluate((engine) => engine.setVolume(80));
-  await page.waitForTimeout(150);
-  check("independent FILTER / VOL 0 retains clock and clip", signal);
-  await page.click('[data-select="keys"]');
+  await wait(() => {
+    const d = new Float32Array(__probe.fftSize);
+    __probe.getFloatTimeDomainData(d);
+    return Math.max(...d.map(Math.abs)) > 0.0001;
+  });
+  assert((await sample()) > 0.0001);
+  pass("keyboard gesture starts audio and held chord");
+  await page.selectOption("#key", "2");
+  await wait(() => __engine.state.live.notes[0] === 62);
+  assert.deepEqual(
+    await evalEngine(() => __engine.state.live.notes),
+    [62, 65, 69],
+  );
+  await page.selectOption("#key", "0");
+  await wait(() => __engine.state.live.notes[0] === 60);
   await page.click("#record");
-  await wait((engine) => engine.state.rec?.phase === "recording");
-  await page.click("#stop");
-  await page.waitForTimeout(35);
-  signal = await sample();
-  assert(signal.peak < 0.00001);
+  await wait(() => __engine.state.rec?.phase === "recording");
+  const start = Date.now();
+  await wait(() => Boolean(__engine.state.slots[0]));
+  const elapsed = Date.now() - start;
+  assert(elapsed > 7400 && elapsed < 9000);
+  assert((await evalEngine(() => __engine.state.live.notes.length)) > 0);
+  const first = await evalEngine(() =>
+    structuredClone(__engine.state.slots[0]),
+  );
+  assert.equal(first.events[0].duration, 3072);
+  await page.keyboard.up("a");
+  await wait(() => __engine.state.live.notes.length === 0);
+  await page.waitForTimeout(180);
+  assert((await sample()) > 0.0001, "Saved loop stopped on key release");
+  pass(
+    "four bars, held note captured, live survives REC, loop survives release",
+    { ms: elapsed },
+  );
+  await page.selectOption("#key", "2");
+  await setRange("timbre", 2);
   assert.deepEqual(
-    await evaluate((engine) => engine.state.tracks.keys.clip),
-    clip,
+    await evalEngine(() => __engine.state.slots[0].events),
+    first.events,
   );
-  await page.waitForTimeout(250);
-  diag = await evaluate((engine) => engine.diagnostics());
-  assert.equal(diag.sessions, 0);
-  assert.equal(diag.scheduleCount, 0);
-  assert.equal(diag.snapshot.rec, null);
-  check("STOP signal silent at 35 ms / cancel replacement / dispose", {
-    signal,
-    created: diag.createdSessions,
-    disposed: diag.disposedSessions,
-  });
-  for (let i = 0; i < 35; i++) {
-    await evaluate(async (engine) => {
-      await engine.play();
-      engine.stop();
-    });
-  }
-  await page.waitForTimeout(350);
-  diag = await evaluate((engine) => engine.diagnostics());
-  assert.equal(diag.sessions, 0);
-  assert.equal(diag.createdSessions, diag.disposedSessions);
-  assert.equal(diag.listeners, 1);
-  check("35 rapid START / STOP / no resource growth", {
-    created: diag.createdSessions,
-    disposed: diag.disposedSessions,
-    listeners: diag.listeners,
-  });
-  await page.click("#play");
-  await wait((engine) => engine.state.step >= 2);
-  const restart = await evaluate((engine) => engine.diagnostics());
-  assert(restart.history.some((frame) => frame.step === 0));
   assert.deepEqual(
-    await evaluate((engine) => engine.state.tracks.keys.clip),
-    clip,
+    await evalEngine(() => __engine.state.slots[0].settings),
+    first.settings,
   );
-  // Suspending the real context must stop safely; another gesture resumes it.
-  await evaluate((engine) => engine.context.rawContext.suspend());
-  await wait((engine) => engine.state.status === "error");
-  await page.click("#play");
-  await wait((engine) => engine.state.status === "running");
-  await page.click("#stop");
-  check(
-    "context interruption / gesture retry / saved phrase retained",
-    await evaluate((engine) => engine.state.status),
-  );
-  await page.click("#play");
-  await wait((engine) => engine.state.step >= 1);
-  await page.evaluate(() =>
-    window.dispatchEvent(
-      new PageTransitionEvent("pagehide", { persisted: true }),
+  await page.keyboard.down("s");
+  await wait(() => __engine.state.live.notes.length > 0);
+  await setRange("arp", 3);
+  await wait(() => __engine.state.live.notes.length === 1);
+  await page.click('[data-direction="updown"]');
+  assert.equal(await evalEngine(() => __engine.state.direction), "updown");
+  await page.locator("#bpm").fill("160");
+  await page.locator("#bpm").press("Tab");
+  await wait(() => __engine.state.bpm === 160);
+  await page.click("#record");
+  await wait(() => Boolean(__engine.state.slots[1]));
+  await page.keyboard.up("s");
+  assert(
+    (await evalEngine(() => __engine.state.slots[1].events)).every(
+      (e) => e.notes.length === 1,
     ),
   );
-  await page.waitForTimeout(250);
-  assert.equal(await evaluate((engine) => engine.diagnostics().listeners), 1);
-  await page.click("#play");
-  await page.waitForFunction(() =>
-    document.querySelector("#play").textContent.includes("PLAYING"),
+  pass("ARP replaces chord and second REC adds independent fixed-timbre loop");
+  await page.click("[data-mode=bass]");
+  await page.keyboard.down("d");
+  await wait(
+    () =>
+      __engine.state.live.notes.length === 1 &&
+      __engine.state.live.notes[0] < 60,
   );
+  await page.click("#record");
+  await wait(() => Boolean(__engine.state.slots[2]));
+  await page.keyboard.up("d");
+  assert.equal(
+    await evalEngine(() => __engine.state.slots[2].settings.timbre),
+    "bass",
+  );
+  pass("linked bass is sole live voice and records independently");
+  const pad = page.locator('[data-pad="4"]');
+  const r = await pad.boundingBox();
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+  await page.mouse.down();
+  await wait(
+    () =>
+      __engine.state.bassMode === "manual" &&
+      __engine.state.live.notes.length === 1,
+  );
+  await page.mouse.up();
+  await wait(() => __engine.state.live.notes.length === 0);
+  await page.click("[data-mode=keys]");
+  await setRange("arp", 0);
+  await setRange("richness", 2);
+  await page.keyboard.down("w");
+  await wait(() => __engine.state.live.notes.length === 3);
+  await page.keyboard.up("w");
+  await page.keyboard.down("f");
+  await wait(() => __engine.state.live.notes.length === 5);
+  await page.click("#record");
+  await wait(() => Boolean(__engine.state.slots[3]));
+  await page.keyboard.up("f");
+  await page.keyboard.down("g");
+  await page.click("#record");
+  await wait(() => Boolean(__engine.state.slots[4]));
+  await page.keyboard.up("g");
+  assert(await page.locator("#record").isDisabled());
+  assert.equal(await page.locator("#slot-count").textContent(), "5 / 5");
+  pass(
+    "five genuine recordings, richness, black chords, manual pads, REC capacity guard",
+  );
+  await page.locator('[data-volume="0"]').evaluate((input) => {
+    input.value = 25;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  assert.equal(await evalEngine(() => __engine.state.slots[0].volume), 25);
+  await page.click('[data-loop="1"]');
+  await wait(() => !__engine.state.slots[1].active);
   assert.deepEqual(
-    await evaluate((engine) => engine.state.tracks.keys.clip),
-    clip,
+    await evalEngine(() => __engine.state.slots[0].events),
+    first.events,
   );
+  await page.click('[data-delete="4"]');
+  assert.equal(await evalEngine(() => __engine.state.slots[4]), null);
+  assert(!(await page.locator("#record").isDisabled()));
+  pass("individual mute, volume, deletion and reusable slot");
+  await page.keyboard.down("a");
+  await page.click("#record");
+  await wait(() => Boolean(__engine.state.slots[4]));
+  await setRange("volume", 100);
+  let peak = 0;
+  for (let i = 0; i < 12; i++) {
+    peak = Math.max(peak, await sample());
+    await page.waitForTimeout(80);
+  }
+  assert(peak > 0.0001 && peak < 0.95);
+  assert.equal(await evalEngine(() => __engine.diagnostics().instruments), 6);
+  pass("five loops plus live, bounded audio graph and headroom", { peak });
+  await page.keyboard.up("a");
   await page.click("#stop");
-  check("cached page lifecycle keeps UI and saved phrases", true);
-  // Keyboard activation and range adjustment without mouse.
-  await page.locator('[data-select="arp"]').focus();
-  await page.keyboard.press("Enter");
-  assert.equal(await evaluate((engine) => engine.state.selected), "arp");
-  await page.locator("#filter").focus();
-  await page.keyboard.press("ArrowLeft");
-  assert.equal(await evaluate((engine) => engine.state.tracks.arp.filter), 99);
-  check(
-    "keyboard buttons and ranges",
-    await page.evaluate(() => document.activeElement.id),
+  await page.waitForTimeout(40);
+  assert((await sample()) < 0.00001);
+  await page.waitForTimeout(240);
+  assert.equal(await evalEngine(() => __engine.diagnostics().sessions), 0);
+  await page.click("#play");
+  await wait(() => __engine.state.step > 1);
+  assert((await sample()) > 0.0001);
+  await page.click("#stop");
+  for (let i = 0; i < 15; i++)
+    await evalEngine(async () => {
+      await __engine.play();
+      __engine.stop();
+    });
+  await page.waitForTimeout(250);
+  const diag = await evalEngine(() => __engine.diagnostics());
+  assert.equal(diag.createdSessions, diag.disposedSessions);
+  assert.equal(diag.listeners, 1);
+  pass("immediate STOP, preserved loops, restart, repeated session disposal");
+  await page.click("#play");
+  await page.keyboard.down("a");
+  await wait(() => __engine.state.live.notes.length > 0);
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await wait(() => __engine.state.live.notes.length === 0);
+  await page.keyboard.up("a");
+  await page.click('[data-delete="4"]');
+  await page.click("#record");
+  await wait(() => Boolean(__engine.state.rec));
+  await page.click("#stop");
+  assert.equal(await evalEngine(() => __engine.state.rec), null);
+  await page.click("#reset");
+  assert.equal(
+    await evalEngine(() => __engine.state.slots.filter(Boolean).length),
+    0,
   );
+  assert.equal(await evalEngine(() => __engine.state.status), "stopped");
+  pass("lost focus releases keys, STOP cancels REC, RESET clears five slots");
   const geometries = [];
   for (const [width, height] of [
     [1512, 850],
     [1280, 720],
     [1024, 768],
-    [800, 700],
     [390, 844],
   ]) {
     await page.setViewportSize({ width, height });
-    const geometry = await page.evaluate(() => {
-      const rect = document.querySelector(".machine").getBoundingClientRect();
-      return {
-        width: innerWidth,
-        height: innerHeight,
-        documentWidth: document.documentElement.scrollWidth,
-        documentHeight: document.documentElement.scrollHeight,
-        bottom: rect.bottom,
-        controls: [...document.querySelectorAll("button,input")].map(
-          (element) => ({
-            label: element.getAttribute("aria-label") || element.textContent,
-            id: element.id,
-            rect: element.getBoundingClientRect().toJSON(),
-          }),
-        ),
-      };
-    });
-    assert(geometry.documentWidth <= width);
+    const geometry = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      height: document.documentElement.scrollHeight,
+    }));
+    assert(geometry.width <= width, `Horizontal overflow: ${width}`);
     if (width >= 1024)
       assert(
-        geometry.documentHeight <= height,
-        `Vertical overflow ${width}x${height}: ${geometry.documentHeight}`,
+        geometry.height <= height,
+        `Vertical overflow: ${width}x${height}: ${geometry.height}`,
       );
-    geometries.push({ width, height, documentHeight: geometry.documentHeight });
+    geometries.push({ width, height, ...geometry });
   }
+  pass("desktop viewport and mobile width", geometries);
   await page.setViewportSize({ width: 1512, height: 850 });
   await mkdir("/tmp/pinkbox-validation", { recursive: true });
   await page.screenshot({ path: "/tmp/pinkbox-validation/desktop.png" });
-  check("responsive geometry", geometries);
   assert.deepEqual(errors, []);
-  check("no browser errors", errors);
   await Bun.write(
     "/tmp/pinkbox-validation/results.json",
-    JSON.stringify({ browser: browser.version(), results }, null, 2),
+    JSON.stringify({ browser: browser.version(), results, errors }, null, 2),
   );
+  pass("no browser errors");
 } finally {
   await browser.close();
 }

@@ -69,7 +69,7 @@ try {
     assert(item.ratio >= 4.5, `Contrast ${item.text}: ${item.ratio}`);
   await page.click("#play");
   await page.waitForFunction(() =>
-    document.querySelector("#play").textContent.includes("PLAYING"),
+    document.querySelector("#play").disabled,
   );
   await page.locator("#bpm").focus();
   await page.locator("#bpm").fill("100");
